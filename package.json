@@ -1,0 +1,12 @@
+{
+  "name": "newget-registros",
+  "version": "1.0.0",
+  "description": "Dashboard para monitoramento de registros",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2"
+  }
+} 
