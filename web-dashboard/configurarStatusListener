@@ -1,0 +1,49 @@
+// Função para configurar listeners para atualizações de status em tempo real
+function configurarStatusListener(codigo) {
+    // Listener para o timestamp do pc_status
+    const statusRef = database.ref(`/${codigo}/pc_status/timestamp`);
+    statusRef.on('value', (snapshot) => {
+        // Quando o timestamp mudar, buscar todas as informações da loja
+        database.ref(`/${codigo}`).once('value')
+            .then(lojaSnapshot => {
+                if (lojaSnapshot.exists()) {
+                    const loja = lojaSnapshot.val();
+                    // Atualiza o card da loja com as novas informações
+                    atualizarStatusLoja(codigo, loja);
+                }
+            })
+            .catch(error => {
+                console.error(`Erro ao atualizar status da loja ${codigo}:`, error);
+            });
+    });
+    
+    // Listener específico para o status da motherboard
+    const motherboardRef = database.ref(`/${codigo}/status_motherboard`);
+    motherboardRef.on('value', (snapshot) => {
+        if (snapshot.exists()) {
+            const status = snapshot.val();
+            console.log(`Status da motherboard ${codigo} atualizado: ${status}`);
+            
+            // Busca o elemento do card no DOM
+            const cardElement = document.querySelector(`.card[data-loja="${codigo}"]`);
+            if (cardElement) {
+                const motherboardStatusText = cardElement.querySelector('.motherboard-status');
+                const motherboardIndicator = cardElement.querySelector('.motherboard-indicator');
+                
+                if (motherboardStatusText && motherboardIndicator) {
+                    const isMotherboardOn = status === 'ON';
+                    motherboardStatusText.textContent = `Motherboard: ${isMotherboardOn ? 'ON' : 'OFF'}`;
+                    motherboardStatusText.className = `${isMotherboardOn ? 'text-success' : 'text-danger'} fw-medium motherboard-status small-text`;
+                    
+                    // Atualiza o indicador de status da motherboard
+                    motherboardIndicator.classList.remove('status-online', 'status-offline');
+                    if (isMotherboardOn) {
+                        motherboardIndicator.classList.add('status-online');
+                    } else {
+                        motherboardIndicator.classList.add('status-offline');
+                    }
+                }
+            }
+        }
+    });
+} 
