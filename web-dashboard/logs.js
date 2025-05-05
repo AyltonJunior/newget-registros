@@ -1446,38 +1446,8 @@ function renderizarRegistros(registros) {
         // Produto
         const produto = obterProduto(registro) || '';
         
-        // Dosagem - converter para "Simples" ou "Dupla"
-        let dosagem = '';
-        let valorDosagem = null;
-        
-        // Obter o valor bruto da dosagem
-        if (registro.dose !== undefined) {
-            valorDosagem = registro.dose;
-        } else if (registro.dosagem !== undefined) {
-            valorDosagem = registro.dosagem;
-        } else if (registro.configuracao && registro.configuracao.dosagem !== undefined) {
-            valorDosagem = registro.configuracao.dosagem;
-        } else if (registro.dados && registro.dados.dosagem !== undefined) {
-            valorDosagem = registro.dados.dosagem;
-        }
-        
-        // Converter para o formato desejado
-        if (valorDosagem !== null) {
-            // Converter para número se for string
-            if (typeof valorDosagem === 'string') {
-                valorDosagem = valorDosagem.trim();
-                valorDosagem = isNaN(valorDosagem) ? valorDosagem : Number(valorDosagem);
-            }
-            
-            // Formatar conforme solicitado
-            if (valorDosagem === 1 || valorDosagem === '1') {
-                    dosagem = 'Simples';
-            } else if (valorDosagem === 2 || valorDosagem === '2') {
-                    dosagem = 'Dupla';
-            } else {
-                dosagem = valorDosagem.toString();
-            }
-        }
+        // Determinar a dosagem usando a nova função
+        let dosagem = obterTipoDosagem(registro);
         
         // Tempo
         let tempo = '';
@@ -2110,3 +2080,32 @@ document.addEventListener('DOMContentLoaded', function() {
         buscarRegistros();
     });
 });
+
+// Função para determinar o tipo de dosagem
+function obterTipoDosagem(registro) {
+    // Verificar se tem amaciante nos diferentes possíveis locais do registro
+    const temAmaciante = (
+        registro.amaciante === 1 || registro.amaciante === 2 ||
+        registro.amaciante === '1' || registro.amaciante === '2' ||
+        (registro.configuracao && (
+            registro.configuracao.amaciante === 1 || 
+            registro.configuracao.amaciante === 2 ||
+            registro.configuracao.amaciante === '1' || 
+            registro.configuracao.amaciante === '2'
+        )) ||
+        (registro.dados && (
+            registro.dados.amaciante === 1 || 
+            registro.dados.amaciante === 2 ||
+            registro.dados.amaciante === '1' || 
+            registro.dados.amaciante === '2'
+        ))
+    );
+
+    // Se não tem amaciante, retornar string vazia em vez de "Dosagem Simples"
+    if (!temAmaciante) {
+        return '';
+    }
+
+    // Se tem amaciante, retornar "Dosagem Dupla"
+    return 'Dosagem Dupla';
+}
