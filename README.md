@@ -21,6 +21,7 @@ Este é um dashboard web para monitoramento e gestão de operações de equipame
 - **Status de Loja**: Indicação visual de lojas online (verde) e offline (vermelho)
 - **Status de Totem**: Exibição do estado dos totens (ON/OFF) e indicação de "indisponível" quando a loja está offline
 - **Estatísticas em Tempo Real**: Contadores e gráficos mostrando percentuais de dispositivos online e offline
+- **Registro de Operações**: Log detalhado de todas as operações realizadas, incluindo tipo de reset (ON/OFF)
 
 ## Estrutura do Projeto
 
@@ -34,6 +35,7 @@ Este é um dashboard web para monitoramento e gestão de operações de equipame
   - `firebase-config.js`: Configurações de conexão com o Firebase
   - `firebase-logs.js`: Scripts para gerenciamento de logs e registros
   - `auth-check.js`: Scripts para controle de autenticação
+  - `batch-reset.js`: Funcionalidade de reset em lote de totens
 
 ## Integrações
 
@@ -41,6 +43,7 @@ Este é um dashboard web para monitoramento e gestão de operações de equipame
 - **API ViaCEP**: Integração para obtenção de endereços completos a partir do CEP
 - **Leaflet Maps**: Biblioteca para renderização de mapas interativos
 - **Firebase Authentication**: Sistema de autenticação e gerenciamento de usuários
+- **Vercel**: Plataforma de deploy e hospedagem da aplicação
 
 ## Melhorias Recentes
 
@@ -50,28 +53,59 @@ Este é um dashboard web para monitoramento e gestão de operações de equipame
 - **Layout Responsivo**: Cards que se adaptam em telas grandes (lado a lado) e pequenas (empilhados)
 - **Geocodificação**: Armazenamento de coordenadas precisas no Firebase baseadas no CEP de cada loja
 - **Otimização de Carregamento**: Indicadores de loading durante carregamento de dados
+- **Reset em Lote Aprimorado**: Opções de ligar/desligar totens com registro detalhado da operação
+- **Login Page Modernizada**: Design atualizado com gradientes e animações
+- **Exportação de Dados**: Botões para exportar logs em CSV, Excel e PDF
 
 ## Requisitos Técnicos
 
 - **Frontend**: HTML5, CSS3, JavaScript, Bootstrap 5
 - **Backend**: Firebase (Authentication, Firestore, Realtime Database)
 - **Bibliotecas**: jQuery, DataTables, Font Awesome, SweetAlert2, Leaflet
+- **Deploy**: Vercel (produção), Node.js (desenvolvimento local)
 
 ## Instalação e Uso
 
-1. Configure o projeto Firebase no console do Google Firebase
-2. Substitua as configurações do Firebase no arquivo `firebase-config.js`
-3. Hospede os arquivos em um servidor web ou execute localmente
-4. Acesse a aplicação através do navegador
+1. Clone o repositório:
+   ```bash
+   git clone https://github.com/AyltonJunior/newget-registros.git
+   ```
+
+2. Instale as dependências:
+   ```bash
+   npm install
+   ```
+
+3. Configure o projeto Firebase:
+   - Crie um projeto no console do Google Firebase
+   - Copie as credenciais para o arquivo `firebase-config.js`
+
+4. Execute localmente:
+   ```bash
+   npm start
+   ```
+
+5. Para deploy em produção:
+   - Configure o projeto no Vercel
+   - Conecte com o repositório GitHub
+   - O deploy será automático a cada push na branch master
 
 ## Desenvolvimento
 
 Para contribuir com o projeto:
 
 1. Clone o repositório
-2. Faça suas modificações
-3. Teste localmente
-4. Envie um pull request com suas alterações
+2. Crie uma branch para sua feature: `git checkout -b feature/nova-funcionalidade`
+3. Faça suas modificações
+4. Teste localmente
+5. Commit suas mudanças: `git commit -m "Add: nova funcionalidade"`
+6. Push para a branch: `git push origin feature/nova-funcionalidade`
+7. Abra um Pull Request
+
+## Deploy
+
+O projeto está disponível em produção através do Vercel:
+[https://newget-registros.vercel.app](https://newget-registros.vercel.app)
 
 ## Licença
 
