@@ -1446,8 +1446,35 @@ function renderizarRegistros(registros) {
         // Produto
         const produto = obterProduto(registro) || '';
         
-        // Determinar a dosagem usando a nova função
-        let dosagem = obterTipoDosagem(registro);
+        // Dosagem - converter para "Simples" ou "Dupla"
+        let dosagem = '';
+        let valorDosagem = null;
+        
+        // Obter o valor bruto da dosagem
+        if (registro.dose !== undefined) {
+            valorDosagem = registro.dose;
+        } else if (registro.dosagem !== undefined) {
+            valorDosagem = registro.dosagem;
+        } else if (registro.configuracao && registro.configuracao.dosagem !== undefined) {
+            valorDosagem = registro.configuracao.dosagem;
+        } else if (registro.dados && registro.dados.dosagem !== undefined) {
+            valorDosagem = registro.dados.dosagem;
+        }
+        
+        // Converter para o formato desejado
+        if (valorDosagem !== null) {
+            // Converter para número se for string
+            if (typeof valorDosagem === 'string') {
+                valorDosagem = valorDosagem.trim();
+                valorDosagem = isNaN(valorDosagem) ? valorDosagem : Number(valorDosagem);
+            }
+            
+            // Formatar conforme solicitado
+            if (valorDosagem === 2 || valorDosagem === '2') {
+                dosagem = 'Dupla';
+            }
+            // Se for dosagem simples (1), deixar em branco
+        }
         
         // Tempo
         let tempo = '';
@@ -1577,22 +1604,18 @@ function formatarHorario(timestamp) {
 // Função para obter o produto
 function obterProduto(registro) {
     // Verificar valores de bomba
-    if (registro.bomba === 1 || registro.bomba === '1') return 'Sabão';
     if (registro.bomba === 2 || registro.bomba === '2') return 'Floral';
     if (registro.bomba === 3 || registro.bomba === '3') return 'Sport';
     
     // Verificar valores de amaciante
-    if (registro.amaciante === 0 || registro.amaciante === '0') return 'Sem amaciante';
     if (registro.amaciante === 1 || registro.amaciante === '1') return 'Floral';
     if (registro.amaciante === 2 || registro.amaciante === '2') return 'Sport';
     
     // Verificar nos dados aninhados
     if (registro.configuracao) {
-        if (registro.configuracao.bomba === 1 || registro.configuracao.bomba === '1') return 'Sabão';
         if (registro.configuracao.bomba === 2 || registro.configuracao.bomba === '2') return 'Floral';
         if (registro.configuracao.bomba === 3 || registro.configuracao.bomba === '3') return 'Sport';
         
-        if (registro.configuracao.amaciante === 0 || registro.configuracao.amaciante === '0') return 'Sem amaciante';
         if (registro.configuracao.amaciante === 1 || registro.configuracao.amaciante === '1') return 'Floral';
         if (registro.configuracao.amaciante === 2 || registro.configuracao.amaciante === '2') return 'Sport';
     }
@@ -1740,13 +1763,10 @@ function mostrarDetalhes(dataHora) {
         }
         
         // Aplicar formatação
-        if (valorDosagem === 1 || valorDosagem === '1') {
-            dosagemInfo = 'Simples';
-        } else if (valorDosagem === 2 || valorDosagem === '2') {
+        if (valorDosagem === 2 || valorDosagem === '2') {
             dosagemInfo = 'Dupla';
-        } else {
-            dosagemInfo = valorDosagem.toString();
         }
+        // Se for dosagem simples (1), deixar em branco
     }
     
     // Preencher modal com dados do registro
@@ -2080,42 +2100,3 @@ document.addEventListener('DOMContentLoaded', function() {
         buscarRegistros();
     });
 });
-
-// Função para determinar o tipo de dosagem
-function obterTipoDosagem(registro) {
-    // Verificar o tipo de amaciante em diferentes locais do registro
-    let tipoAmaciante = null;
-
-    // Verificar no registro principal
-    if (registro.amaciante === 1 || registro.amaciante === '1') {
-        tipoAmaciante = 'Floral';
-    } else if (registro.amaciante === 2 || registro.amaciante === '2') {
-        tipoAmaciante = 'Sport';
-    }
-
-    // Verificar em configuracao
-    if (!tipoAmaciante && registro.configuracao) {
-        if (registro.configuracao.amaciante === 1 || registro.configuracao.amaciante === '1') {
-            tipoAmaciante = 'Floral';
-        } else if (registro.configuracao.amaciante === 2 || registro.configuracao.amaciante === '2') {
-            tipoAmaciante = 'Sport';
-        }
-    }
-
-    // Verificar em dados
-    if (!tipoAmaciante && registro.dados) {
-        if (registro.dados.amaciante === 1 || registro.dados.amaciante === '1') {
-            tipoAmaciante = 'Floral';
-        } else if (registro.dados.amaciante === 2 || registro.dados.amaciante === '2') {
-            tipoAmaciante = 'Sport';
-        }
-    }
-
-    // Se não tem amaciante, retornar string vazia
-    if (!tipoAmaciante) {
-        return '';
-    }
-
-    // Se tem amaciante, retornar o tipo de dosagem com o amaciante
-    return `Dosagem ${tipoAmaciante}`;
-}
