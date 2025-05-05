@@ -1450,30 +1450,38 @@ function renderizarRegistros(registros) {
         let dosagem = '';
         let valorDosagem = null;
         
-        // Obter o valor bruto da dosagem
-        if (registro.dose !== undefined) {
-            valorDosagem = registro.dose;
-        } else if (registro.dosagem !== undefined) {
-            valorDosagem = registro.dosagem;
-        } else if (registro.configuracao && registro.configuracao.dosagem !== undefined) {
-            valorDosagem = registro.configuracao.dosagem;
-        } else if (registro.dados && registro.dados.dosagem !== undefined) {
-            valorDosagem = registro.dados.dosagem;
-        }
-        
-        // Converter para o formato desejado
-        if (valorDosagem !== null) {
-            // Converter para número se for string
-            if (typeof valorDosagem === 'string') {
-                valorDosagem = valorDosagem.trim();
-                valorDosagem = isNaN(valorDosagem) ? valorDosagem : Number(valorDosagem);
+        // Se o produto for "sem amaciante", não mostrar a dosagem
+        if (produto.toLowerCase() === 'sem amaciante') {
+            dosagem = '-';
+        } else {
+            // Obter o valor bruto da dosagem
+            if (registro.dose !== undefined) {
+                valorDosagem = registro.dose;
+            } else if (registro.dosagem !== undefined) {
+                valorDosagem = registro.dosagem;
+            } else if (registro.configuracao && registro.configuracao.dosagem !== undefined) {
+                valorDosagem = registro.configuracao.dosagem;
+            } else if (registro.dados && registro.dados.dosagem !== undefined) {
+                valorDosagem = registro.dados.dosagem;
             }
             
-            // Formatar conforme solicitado
-            if (valorDosagem === 2 || valorDosagem === '2') {
-                dosagem = 'Dupla';
+            // Converter para o formato desejado
+            if (valorDosagem !== null) {
+                // Converter para número se for string
+                if (typeof valorDosagem === 'string') {
+                    valorDosagem = valorDosagem.trim();
+                    valorDosagem = isNaN(valorDosagem) ? valorDosagem : Number(valorDosagem);
+                }
+                
+                // Formatar conforme solicitado
+                if (valorDosagem === 1 || valorDosagem === '1') {
+                        dosagem = 'Simples';
+                } else if (valorDosagem === 2 || valorDosagem === '2') {
+                        dosagem = 'Dupla';
+                } else {
+                    dosagem = valorDosagem.toString();
+                }
             }
-            // Se for dosagem simples (1), deixar em branco
         }
         
         // Tempo
@@ -1604,18 +1612,22 @@ function formatarHorario(timestamp) {
 // Função para obter o produto
 function obterProduto(registro) {
     // Verificar valores de bomba
+    if (registro.bomba === 1 || registro.bomba === '1') return 'Sabão';
     if (registro.bomba === 2 || registro.bomba === '2') return 'Floral';
     if (registro.bomba === 3 || registro.bomba === '3') return 'Sport';
     
     // Verificar valores de amaciante
+    if (registro.amaciante === 0 || registro.amaciante === '0') return 'Sem amaciante';
     if (registro.amaciante === 1 || registro.amaciante === '1') return 'Floral';
     if (registro.amaciante === 2 || registro.amaciante === '2') return 'Sport';
     
     // Verificar nos dados aninhados
     if (registro.configuracao) {
+        if (registro.configuracao.bomba === 1 || registro.configuracao.bomba === '1') return 'Sabão';
         if (registro.configuracao.bomba === 2 || registro.configuracao.bomba === '2') return 'Floral';
         if (registro.configuracao.bomba === 3 || registro.configuracao.bomba === '3') return 'Sport';
         
+        if (registro.configuracao.amaciante === 0 || registro.configuracao.amaciante === '0') return 'Sem amaciante';
         if (registro.configuracao.amaciante === 1 || registro.configuracao.amaciante === '1') return 'Floral';
         if (registro.configuracao.amaciante === 2 || registro.configuracao.amaciante === '2') return 'Sport';
     }
@@ -1763,10 +1775,13 @@ function mostrarDetalhes(dataHora) {
         }
         
         // Aplicar formatação
-        if (valorDosagem === 2 || valorDosagem === '2') {
+        if (valorDosagem === 1 || valorDosagem === '1') {
+            dosagemInfo = 'Simples';
+        } else if (valorDosagem === 2 || valorDosagem === '2') {
             dosagemInfo = 'Dupla';
+        } else {
+            dosagemInfo = valorDosagem.toString();
         }
-        // Se for dosagem simples (1), deixar em branco
     }
     
     // Preencher modal com dados do registro
