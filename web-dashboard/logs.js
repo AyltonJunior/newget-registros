@@ -169,6 +169,7 @@ function configurarFiltros() {
     // Configurar botão de Resets em Lote
     if (btnShowBatchResets) {
         btnShowBatchResets.addEventListener('click', function() {
+            console.log('Abrindo modal de histórico de resets em lote...');
             const batchResetsModal = new bootstrap.Modal(document.getElementById('batchResetsModal'));
             carregarResetsBatch();
             batchResetsModal.show();
@@ -2071,26 +2072,33 @@ function carregarResetsBatch() {
             buttons: [
                 {
                     extend: 'csv',
-                    text: '<i class="fas fa-file-csv"></i> CSV',
-                    className: 'btn btn-sm btn-outline-primary'
+                    text: '<i class="fas fa-file-csv me-1"></i>CSV',
+                    className: 'btn btn-primary me-2',
+                    exportOptions: { columns: ':visible' }
                 },
                 {
                     extend: 'excel',
-                    text: '<i class="fas fa-file-excel"></i> Excel',
-                    className: 'btn btn-sm btn-outline-primary'
+                    text: '<i class="fas fa-file-excel me-1"></i>Excel',
+                    className: 'btn btn-success me-2',
+                    exportOptions: { columns: ':visible' }
                 },
                 {
                     extend: 'pdf',
-                    text: '<i class="fas fa-file-pdf"></i> PDF',
-                    className: 'btn btn-sm btn-outline-primary'
+                    text: '<i class="fas fa-file-pdf me-1"></i>PDF',
+                    className: 'btn btn-danger me-2',
+                    exportOptions: { columns: ':visible' }
                 },
                 {
                     extend: 'print',
-                    text: '<i class="fas fa-print"></i> Imprimir',
-                    className: 'btn btn-sm btn-outline-primary'
+                    text: '<i class="fas fa-print me-1"></i>Imprimir',
+                    className: 'btn btn-info me-2 text-white',
+                    exportOptions: { columns: ':visible' }
                 }
             ]
         });
+    } else {
+        // Se já existe, limpar os dados existentes
+        batchResetsTable.clear();
     }
 
     // Buscar dados de resets em lote no Firestore
@@ -2098,33 +2106,41 @@ function carregarResetsBatch() {
         .collection('operacoes_logs')
         .where('tipoOperacao', '==', 'reset_em_lote')
         .orderBy('timestamp', 'desc')
-        .limit(100) // Limitar a 100 registros mais recentes
+        .limit(100)
         .get()
         .then(snapshot => {
             const dados = [];
             snapshot.forEach(doc => {
                 const registro = doc.data();
-                const data = registro.timestamp ? registro.timestamp.toDate() : new Date();
-                const dataFormatada = formatarData(data);
+                const data = registro.timestamp ? 
+                    (registro.timestamp instanceof Date ? registro.timestamp : registro.timestamp.toDate()) 
+                    : new Date();
+                
+                const dataFormatada = `${formatarData(data)} ${formatarHorario(data)}`;
                 
                 dados.push([
                     dataFormatada,
-                    registro.displayName || registro.email || 'N/A',
+                    registro.displayName || registro.usuario || 'N/A',
                     registro.escopo || 'N/A',
                     registro.regiao || registro.estado || 'N/A',
-                    registro.lojasAfetadas?.length || 0,
-                    registro.tipoReset || 'N/A'
+                    registro.quantidadeLojas || (Array.isArray(registro.lojasAfetadas) ? registro.lojasAfetadas.length : 'N/A'),
+                    registro.tipoReset || 'Reset'
                 ]);
             });
             
-            // Limpar e atualizar a tabela
-            batchResetsTable.clear();
+            // Adicionar e desenhar os dados na tabela
             batchResetsTable.rows.add(dados);
             batchResetsTable.draw();
+            
+            console.log(`Carregados ${dados.length} registros de reset em lote`);
         })
         .catch(error => {
             console.error('Erro ao carregar resets em lote:', error);
-            alert('Erro ao carregar histórico de resets em lote. Por favor, tente novamente.');
+            Swal.fire({
+                icon: 'error',
+                title: 'Erro ao carregar histórico',
+                text: 'Ocorreu um erro ao carregar o histórico de resets em lote. Por favor, tente novamente.'
+            });
         });
 }
 
