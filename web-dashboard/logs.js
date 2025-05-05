@@ -2083,29 +2083,39 @@ document.addEventListener('DOMContentLoaded', function() {
 
 // Função para determinar o tipo de dosagem
 function obterTipoDosagem(registro) {
-    // Verificar se tem amaciante nos diferentes possíveis locais do registro
-    const temAmaciante = (
-        registro.amaciante === 1 || registro.amaciante === 2 ||
-        registro.amaciante === '1' || registro.amaciante === '2' ||
-        (registro.configuracao && (
-            registro.configuracao.amaciante === 1 || 
-            registro.configuracao.amaciante === 2 ||
-            registro.configuracao.amaciante === '1' || 
-            registro.configuracao.amaciante === '2'
-        )) ||
-        (registro.dados && (
-            registro.dados.amaciante === 1 || 
-            registro.dados.amaciante === 2 ||
-            registro.dados.amaciante === '1' || 
-            registro.dados.amaciante === '2'
-        ))
-    );
+    // Verificar o tipo de amaciante em diferentes locais do registro
+    let tipoAmaciante = null;
 
-    // Se não tem amaciante, retornar string vazia em vez de "Dosagem Simples"
-    if (!temAmaciante) {
+    // Verificar no registro principal
+    if (registro.amaciante === 1 || registro.amaciante === '1') {
+        tipoAmaciante = 'Floral';
+    } else if (registro.amaciante === 2 || registro.amaciante === '2') {
+        tipoAmaciante = 'Sport';
+    }
+
+    // Verificar em configuracao
+    if (!tipoAmaciante && registro.configuracao) {
+        if (registro.configuracao.amaciante === 1 || registro.configuracao.amaciante === '1') {
+            tipoAmaciante = 'Floral';
+        } else if (registro.configuracao.amaciante === 2 || registro.configuracao.amaciante === '2') {
+            tipoAmaciante = 'Sport';
+        }
+    }
+
+    // Verificar em dados
+    if (!tipoAmaciante && registro.dados) {
+        if (registro.dados.amaciante === 1 || registro.dados.amaciante === '1') {
+            tipoAmaciante = 'Floral';
+        } else if (registro.dados.amaciante === 2 || registro.dados.amaciante === '2') {
+            tipoAmaciante = 'Sport';
+        }
+    }
+
+    // Se não tem amaciante, retornar string vazia
+    if (!tipoAmaciante) {
         return '';
     }
 
-    // Se tem amaciante, retornar "Dosagem Dupla"
-    return 'Dosagem Dupla';
+    // Se tem amaciante, retornar o tipo de dosagem com o amaciante
+    return `Dosagem ${tipoAmaciante}`;
 }
