@@ -2,6 +2,7 @@
 const btnRecarregarTabela = document.getElementById('btnRecarregarTabela');
 const btnAplicarFiltros = document.getElementById('btnAplicarFiltros');
 const btnLimparFiltros = document.getElementById('btnLimparFiltros');
+const btnShowBatchResets = document.getElementById('btnShowBatchResets');
 const filtroLoja = document.getElementById('filtroLoja');
 const filtroOperacao = document.getElementById('filtroOperacao');
 const filtroMaquina = document.getElementById('filtroMaquina');
@@ -26,6 +27,8 @@ let registrosCache = {};
 // Verificar se não encontramos dados úteis, tente recarregar
 let tentativasRecarregamento = 0;
 const MAX_TENTATIVAS = 3;
+
+let batchResetsTable;
 
 // Function to hide the loading spinner
 function hideLoadingSpinner() {
@@ -80,6 +83,7 @@ function configurarFiltros() {
     // Verificar se os elementos existem
     const btnAplicarFiltros = document.getElementById('btnAplicarFiltros');
     const btnLimparFiltros = document.getElementById('btnLimparFiltros');
+    const btnShowBatchResets = document.getElementById('btnShowBatchResets');
     const btnExportCsv = document.getElementById('btnExportCsv');
     const btnExportExcel = document.getElementById('btnExportExcel');
     const btnExportPdf = document.getElementById('btnExportPdf');
@@ -161,6 +165,15 @@ function configurarFiltros() {
     }
     
     console.log('Eventos dos botões de filtro configurados com sucesso');
+    
+    // Configurar botão de Resets em Lote
+    if (btnShowBatchResets) {
+        btnShowBatchResets.addEventListener('click', function() {
+            const batchResetsModal = new bootstrap.Modal(document.getElementById('batchResetsModal'));
+            carregarResetsBatch();
+            batchResetsModal.show();
+        });
+    }
 }
 
 // Popular seletores de filtro com dados disponíveis
@@ -2039,6 +2052,79 @@ function carregarTodosRegistros() {
                 btnCarregarTodos.innerHTML = '<i class="fas fa-list-alt me-1"></i>Mostrar Todos Registros';
                 btnCarregarTodos.disabled = false;
             }
+        });
+}
+
+// Função para carregar os resets em lote
+function carregarResetsBatch() {
+    console.log('Carregando resets em lote...');
+    
+    // Inicializar DataTable se ainda não foi inicializado
+    if (!batchResetsTable) {
+        batchResetsTable = $('#batchResetsTable').DataTable({
+            language: {
+                url: 'https://cdn.datatables.net/plug-ins/1.13.1/i18n/pt-BR.json'
+            },
+            order: [[0, 'desc']], // Ordenar por data/hora decrescente
+            pageLength: 10,
+            dom: 'Bfrtip',
+            buttons: [
+                {
+                    extend: 'csv',
+                    text: '<i class="fas fa-file-csv"></i> CSV',
+                    className: 'btn btn-sm btn-outline-primary'
+                },
+                {
+                    extend: 'excel',
+                    text: '<i class="fas fa-file-excel"></i> Excel',
+                    className: 'btn btn-sm btn-outline-primary'
+                },
+                {
+                    extend: 'pdf',
+                    text: '<i class="fas fa-file-pdf"></i> PDF',
+                    className: 'btn btn-sm btn-outline-primary'
+                },
+                {
+                    extend: 'print',
+                    text: '<i class="fas fa-print"></i> Imprimir',
+                    className: 'btn btn-sm btn-outline-primary'
+                }
+            ]
+        });
+    }
+
+    // Buscar dados de resets em lote no Firestore
+    firebase.firestore()
+        .collection('operacoes_logs')
+        .where('tipoOperacao', '==', 'reset_em_lote')
+        .orderBy('timestamp', 'desc')
+        .limit(100) // Limitar a 100 registros mais recentes
+        .get()
+        .then(snapshot => {
+            const dados = [];
+            snapshot.forEach(doc => {
+                const registro = doc.data();
+                const data = registro.timestamp ? registro.timestamp.toDate() : new Date();
+                const dataFormatada = formatarData(data);
+                
+                dados.push([
+                    dataFormatada,
+                    registro.displayName || registro.email || 'N/A',
+                    registro.escopo || 'N/A',
+                    registro.regiao || registro.estado || 'N/A',
+                    registro.lojasAfetadas?.length || 0,
+                    registro.tipoReset || 'N/A'
+                ]);
+            });
+            
+            // Limpar e atualizar a tabela
+            batchResetsTable.clear();
+            batchResetsTable.rows.add(dados);
+            batchResetsTable.draw();
+        })
+        .catch(error => {
+            console.error('Erro ao carregar resets em lote:', error);
+            alert('Erro ao carregar histórico de resets em lote. Por favor, tente novamente.');
         });
 }
 
