@@ -83,13 +83,11 @@ confirmBatchReset.addEventListener('click', async function() {
     const scope = document.querySelector('input[name="resetScope"]:checked').value;
     const type = resetType.value;
     let lojas = [];
-    let regiaoOuEstado = '';
     
     // Coletar lojas baseado no escopo selecionado
     if (scope === 'filtered' && window.dataTable) {
         lojas = window.dataTable.rows({ search: 'applied' }).data().map(row => row[2]);
     } else if (scope === 'region' && resetRegion.value) {
-        regiaoOuEstado = resetRegion.value;
         lojas = window.dataTable.rows().data()
             .filter(row => {
                 const estado = row[2].split('-')[0].trim();
@@ -97,7 +95,6 @@ confirmBatchReset.addEventListener('click', async function() {
             })
             .map(row => row[2]);
     } else if (scope === 'state' && resetState.value) {
-        regiaoOuEstado = resetState.value;
         lojas = window.dataTable.rows().data()
             .filter(row => {
                 const estado = row[2].split('-')[0].trim();
@@ -135,31 +132,8 @@ confirmBatchReset.addEventListener('click', async function() {
     
     if (result.isConfirmed) {
         try {
-            // Preparar dados para registro no Firestore
-            const dadosRegistro = {
-                timestamp: firebase.firestore.FieldValue.serverTimestamp(),
-                tipoOperacao: 'reset_em_lote',
-                tipoReset: type === 'restart' ? 'Reset ON' : 'Reset OFF',
-                escopo: scope,
-                usuario: firebase.auth().currentUser?.email || 'Não identificado',
-                displayName: firebase.auth().currentUser?.displayName || 'Não identificado',
-                lojasAfetadas: lojas,
-                quantidadeLojas: lojas.length
-            };
-
-            // Adicionar região ou estado se aplicável
-            if (scope === 'region') {
-                dadosRegistro.regiao = regiaoOuEstado;
-            } else if (scope === 'state') {
-                dadosRegistro.estado = regiaoOuEstado;
-            }
-
-            // Registrar no Firestore
-            await firebase.firestore().collection('operacoes_logs').add(dadosRegistro);
-            console.log('Reset em lote registrado com sucesso:', dadosRegistro);
-
-            // Executar os resets
             // Aqui você implementaria a lógica real de reset
+            // Por enquanto, apenas simularemos o sucesso
             await new Promise(resolve => setTimeout(resolve, 1500));
             
             Swal.fire({

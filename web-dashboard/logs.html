@@ -403,12 +403,6 @@
                         <span>Registros</span>
                     </a>
                 </li>
-                <li>
-                    <a href="#" data-bs-toggle="modal" data-bs-target="#batchResetModal">
-                        <i class="fas fa-power-off"></i>
-                        <span>Reset em Lote</span>
-                    </a>
-                </li>
             </ul>
             
             <!-- User Profile at bottom of sidebar -->
@@ -505,9 +499,6 @@
                                     </button>
                                     <button id="btnExportPrint" class="btn btn-sm btn-outline-primary me-1">
                                         <i class="fas fa-print me-1"></i>Imprimir
-                                    </button>
-                                    <button id="btnShowBatchResets" class="btn btn-sm btn-outline-success me-1">
-                                        <i class="fas fa-layer-group me-1"></i>Resets em Lote
                                     </button>
                                 </div>
                                 <div>
@@ -729,40 +720,6 @@
                     <button type="button" class="btn btn-danger" id="confirm-batch-reset">
                         <i class="fas fa-power-off me-2"></i>Executar Reset
                     </button>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Modal para Resets em Lote -->
-    <div class="modal fade" id="batchResetsModal" tabindex="-1" aria-labelledby="batchResetsModalLabel" aria-hidden="true">
-        <div class="modal-dialog modal-lg">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title" id="batchResetsModalLabel">Histórico de Resets em Lote</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                </div>
-                <div class="modal-body">
-                    <div class="table-responsive">
-                        <table id="batchResetsTable" class="table table-striped table-hover">
-                            <thead>
-                                <tr>
-                                    <th>Data/Hora</th>
-                                    <th>Usuário</th>
-                                    <th>Escopo</th>
-                                    <th>Região/Estado</th>
-                                    <th>Lojas Afetadas</th>
-                                    <th>Tipo Reset</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <!-- Dados serão preenchidos via JavaScript -->
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Fechar</button>
                 </div>
             </div>
         </div>

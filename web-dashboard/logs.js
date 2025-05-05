@@ -2,7 +2,6 @@
 const btnRecarregarTabela = document.getElementById('btnRecarregarTabela');
 const btnAplicarFiltros = document.getElementById('btnAplicarFiltros');
 const btnLimparFiltros = document.getElementById('btnLimparFiltros');
-const btnShowBatchResets = document.getElementById('btnShowBatchResets');
 const filtroLoja = document.getElementById('filtroLoja');
 const filtroOperacao = document.getElementById('filtroOperacao');
 const filtroMaquina = document.getElementById('filtroMaquina');
@@ -27,8 +26,6 @@ let registrosCache = {};
 // Verificar se não encontramos dados úteis, tente recarregar
 let tentativasRecarregamento = 0;
 const MAX_TENTATIVAS = 3;
-
-let batchResetsTable;
 
 // Function to hide the loading spinner
 function hideLoadingSpinner() {
@@ -83,7 +80,6 @@ function configurarFiltros() {
     // Verificar se os elementos existem
     const btnAplicarFiltros = document.getElementById('btnAplicarFiltros');
     const btnLimparFiltros = document.getElementById('btnLimparFiltros');
-    const btnShowBatchResets = document.getElementById('btnShowBatchResets');
     const btnExportCsv = document.getElementById('btnExportCsv');
     const btnExportExcel = document.getElementById('btnExportExcel');
     const btnExportPdf = document.getElementById('btnExportPdf');
@@ -165,16 +161,6 @@ function configurarFiltros() {
     }
     
     console.log('Eventos dos botões de filtro configurados com sucesso');
-    
-    // Configurar botão de Resets em Lote
-    if (btnShowBatchResets) {
-        btnShowBatchResets.addEventListener('click', function() {
-            console.log('Abrindo modal de histórico de resets em lote...');
-            const batchResetsModal = new bootstrap.Modal(document.getElementById('batchResetsModal'));
-            carregarResetsBatch();
-            batchResetsModal.show();
-        });
-    }
 }
 
 // Popular seletores de filtro com dados disponíveis
@@ -1095,15 +1081,15 @@ function buscarRegistros() {
                 
                 // Adicionar botão "Carregar Mais" se não existir
                 adicionarBotaoCarregarMais();
-            } else {
+        } else {
                 console.log('Nenhum registro encontrado');
                 if (tentativasRecarregamento < MAX_TENTATIVAS) {
                     tentativasRecarregamento++;
                     setTimeout(buscarRegistros, 1000);
-                } else {
+    } else {
                     alert('Não foi possível encontrar registros de operações.');
-                }
-            }
+        }
+    }
         })
         .catch(error => {
             console.error('Erro ao buscar registros:', error);
@@ -1468,32 +1454,32 @@ function renderizarRegistros(registros) {
         if (produto.toLowerCase() === 'sem amaciante') {
             dosagem = '-';
         } else {
-            // Obter o valor bruto da dosagem
-            if (registro.dose !== undefined) {
-                valorDosagem = registro.dose;
-            } else if (registro.dosagem !== undefined) {
-                valorDosagem = registro.dosagem;
-            } else if (registro.configuracao && registro.configuracao.dosagem !== undefined) {
-                valorDosagem = registro.configuracao.dosagem;
-            } else if (registro.dados && registro.dados.dosagem !== undefined) {
-                valorDosagem = registro.dados.dosagem;
+        // Obter o valor bruto da dosagem
+        if (registro.dose !== undefined) {
+            valorDosagem = registro.dose;
+        } else if (registro.dosagem !== undefined) {
+            valorDosagem = registro.dosagem;
+        } else if (registro.configuracao && registro.configuracao.dosagem !== undefined) {
+            valorDosagem = registro.configuracao.dosagem;
+        } else if (registro.dados && registro.dados.dosagem !== undefined) {
+            valorDosagem = registro.dados.dosagem;
+        }
+        
+        // Converter para o formato desejado
+        if (valorDosagem !== null) {
+            // Converter para número se for string
+            if (typeof valorDosagem === 'string') {
+                valorDosagem = valorDosagem.trim();
+                valorDosagem = isNaN(valorDosagem) ? valorDosagem : Number(valorDosagem);
             }
             
-            // Converter para o formato desejado
-            if (valorDosagem !== null) {
-                // Converter para número se for string
-                if (typeof valorDosagem === 'string') {
-                    valorDosagem = valorDosagem.trim();
-                    valorDosagem = isNaN(valorDosagem) ? valorDosagem : Number(valorDosagem);
-                }
-                
-                // Formatar conforme solicitado
-                if (valorDosagem === 1 || valorDosagem === '1') {
-                        dosagem = 'Simples';
-                } else if (valorDosagem === 2 || valorDosagem === '2') {
-                        dosagem = 'Dupla';
-                } else {
-                    dosagem = valorDosagem.toString();
+            // Formatar conforme solicitado
+            if (valorDosagem === 1 || valorDosagem === '1') {
+                    dosagem = 'Simples';
+            } else if (valorDosagem === 2 || valorDosagem === '2') {
+                    dosagem = 'Dupla';
+            } else {
+                dosagem = valorDosagem.toString();
                 }
             }
         }
@@ -2053,94 +2039,6 @@ function carregarTodosRegistros() {
                 btnCarregarTodos.innerHTML = '<i class="fas fa-list-alt me-1"></i>Mostrar Todos Registros';
                 btnCarregarTodos.disabled = false;
             }
-        });
-}
-
-// Função para carregar os resets em lote
-function carregarResetsBatch() {
-    console.log('Carregando resets em lote...');
-    
-    // Inicializar DataTable se ainda não foi inicializado
-    if (!batchResetsTable) {
-        batchResetsTable = $('#batchResetsTable').DataTable({
-            language: {
-                url: 'https://cdn.datatables.net/plug-ins/1.13.1/i18n/pt-BR.json'
-            },
-            order: [[0, 'desc']], // Ordenar por data/hora decrescente
-            pageLength: 10,
-            dom: 'Bfrtip',
-            buttons: [
-                {
-                    extend: 'csv',
-                    text: '<i class="fas fa-file-csv me-1"></i>CSV',
-                    className: 'btn btn-primary me-2',
-                    exportOptions: { columns: ':visible' }
-                },
-                {
-                    extend: 'excel',
-                    text: '<i class="fas fa-file-excel me-1"></i>Excel',
-                    className: 'btn btn-success me-2',
-                    exportOptions: { columns: ':visible' }
-                },
-                {
-                    extend: 'pdf',
-                    text: '<i class="fas fa-file-pdf me-1"></i>PDF',
-                    className: 'btn btn-danger me-2',
-                    exportOptions: { columns: ':visible' }
-                },
-                {
-                    extend: 'print',
-                    text: '<i class="fas fa-print me-1"></i>Imprimir',
-                    className: 'btn btn-info me-2 text-white',
-                    exportOptions: { columns: ':visible' }
-                }
-            ]
-        });
-    } else {
-        // Se já existe, limpar os dados existentes
-        batchResetsTable.clear();
-    }
-
-    // Buscar dados de resets em lote no Firestore
-    firebase.firestore()
-        .collection('operacoes_logs')
-        .where('tipoOperacao', '==', 'reset_em_lote')
-        .orderBy('timestamp', 'desc')
-        .limit(100)
-        .get()
-        .then(snapshot => {
-            const dados = [];
-            snapshot.forEach(doc => {
-                const registro = doc.data();
-                const data = registro.timestamp ? 
-                    (registro.timestamp instanceof Date ? registro.timestamp : registro.timestamp.toDate()) 
-                    : new Date();
-                
-                const dataFormatada = `${formatarData(data)} ${formatarHorario(data)}`;
-                
-                dados.push([
-                    dataFormatada,
-                    registro.displayName || registro.usuario || 'N/A',
-                    registro.escopo || 'N/A',
-                    registro.regiao || registro.estado || 'N/A',
-                    registro.quantidadeLojas || (Array.isArray(registro.lojasAfetadas) ? registro.lojasAfetadas.length : 'N/A'),
-                    registro.tipoReset || 'Reset'
-                ]);
-            });
-            
-            // Adicionar e desenhar os dados na tabela
-            batchResetsTable.rows.add(dados);
-            batchResetsTable.draw();
-            
-            console.log(`Carregados ${dados.length} registros de reset em lote`);
-        })
-        .catch(error => {
-            console.error('Erro ao carregar resets em lote:', error);
-            Swal.fire({
-                icon: 'error',
-                title: 'Erro ao carregar histórico',
-                text: 'Ocorreu um erro ao carregar o histórico de resets em lote. Por favor, tente novamente.'
-            });
         });
 }
 

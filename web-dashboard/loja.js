@@ -2057,7 +2057,7 @@ function enviarComandoReset(tipo) {
                                 showAlert(`Totem ${tipo == 1 ? 'ligado' : 'desligado'} com sucesso!`, 'Concluído', 'success', true);
                                 
                                 // Registra a operação no Firestore quando houver confirmação
-                                const tipoReset = tipo == 1 ? 'ligar' : 'desligar';
+                                const tipoReset = tipo == 1 ? 'Reset ON' : 'Reset OFF';
                                 registrarReset(lojaId, tipoReset)
                                 .catch(error => {
                                     console.error(`Erro ao registrar reset no Firestore: ${error.message}`);

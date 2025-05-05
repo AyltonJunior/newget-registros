@@ -201,11 +201,11 @@ function registrarAcionamentoDosadora(lojaId, dosadoraId, configuracao) {
 /**
  * Registra reset
  * @param {string} lojaId - ID da loja
- * @param {string} tipo - Tipo de reset (reiniciar, desligar)
+ * @param {string} tipo - Tipo de reset (Reset ON, Reset OFF)
  * @returns {Promise}
  */
 function registrarReset(lojaId, tipo) {
-    const params = { lojaId, tipoReset: tipo };
+    const params = { lojaId, operacao: tipo };
     
     // Verificar se esta operação foi realizada recentemente
     if (operacaoRecente('reset', params)) {
