@@ -8,6 +8,14 @@ const filtroMaquina = document.getElementById('filtroMaquina');
 const dataDe = document.getElementById('dataDe');
 const dataAte = document.getElementById('dataAte');
 
+// Constantes para o cache
+const CACHE_KEY_LOGS = 'cached_logs_data';
+const CACHE_KEY_LOGS_TIMESTAMP = 'cached_logs_timestamp';
+const CACHE_EXPIRY_TIME = 30 * 60 * 1000; // 30 minutos em milissegundos
+const FILTROS_LOGS_KEY = 'saved_logs_filters';
+const CACHE_KEY_STATUS_MACHINE = 'cached_status_machine_data';
+const CACHE_KEY_STATUS_MACHINE_TIMESTAMP = 'cached_status_machine_timestamp';
+
 // Referência à coleção no Firestore
 const operacoesRef = firebase.firestore().collection('operacoes_logs');
 
@@ -26,6 +34,13 @@ let registrosCache = {};
 // Verificar se não encontramos dados úteis, tente recarregar
 let tentativasRecarregamento = 0;
 const MAX_TENTATIVAS = 3;
+
+// Variáveis globais para o modal de status_machine
+let statusMachineModal = null;
+let machineStatusDetailModal = null;
+let statusMachineData = [];
+let filteredStatusMachineData = [];
+let lojasComStatus = new Set();
 
 // Function to hide the loading spinner
 function hideLoadingSpinner() {
@@ -947,11 +962,57 @@ function configurarTabela() {
 function buscarRegistros() {
     console.log('Buscando registros...');
     
+    // Verificar primeiro se há dados no cache
+    const dadosCache = carregarLogsDoCache();
+    if (dadosCache) {
+        console.log('Carregando registros do cache local...');
+        // Processar os dados do cache
+        dadosOriginais = dadosCache;
+        
+        // Extrair valores únicos para os filtros
+        extrairValoresUnicosParaFiltros(dadosCache);
+        
+        // Popular os seletores de filtro
+        popularSeletoresFiltro();
+        
+        // Processar e exibir os registros na tabela
+        const registrosProcessados = processarRegistros(dadosCache);
+        
+        // Renderizar os registros
+        renderizarRegistros(registrosProcessados);
+        
+        // Adicionar botão "Carregar Mais" se não existir
+        adicionarBotaoCarregarMais();
+        
+        // Iniciar atualização em segundo plano
+        setTimeout(() => {
+            buscarRegistrosDoFirebase(true);
+        }, 2000);
+        
+        return;
+    }
+    
+    // Se não há cache ou está expirado, buscar do Firebase
+    buscarRegistrosDoFirebase();
+}
+
+// Função para buscar registros diretamente do Firebase
+function buscarRegistrosDoFirebase(atualizacaoEmSegundoPlano = false) {
+    console.log('Buscando registros do Firebase...');
+    
+    if (!atualizacaoEmSegundoPlano) {
+        // Mostrar loading apenas se não for atualização em segundo plano
+        const loadingOverlay = document.getElementById('loadingOverlay');
+        if (loadingOverlay) {
+            loadingOverlay.style.display = 'flex';
+        }
+    }
+    
     // Limpar as coleções de valores únicos para os filtros
     todasLojas.clear();
     todasMaquinas.clear();
     
-    // Criar uma query base ordenada por timestamp decrescente e limitada a 10 registros
+    // Criar uma query base ordenada por timestamp decrescente e limitada a registros
     let query = firebase.firestore().collection(colecaoRegistros)
         .orderBy('timestamp', 'desc')
         .limit(10);  // Alterado para 10 registros
@@ -977,6 +1038,53 @@ function buscarRegistros() {
                 dadosOriginais = registros;
                 
                 // Extrair valores únicos para os filtros
+                extrairValoresUnicosParaFiltros(registros);
+                
+                // Popular os seletores de filtro
+                popularSeletoresFiltro();
+                
+                // Processar e exibir os registros na tabela
+                const registrosProcessados = processarRegistros(registros);
+                
+                // Renderizar os registros
+                renderizarRegistros(registrosProcessados);
+                
+                tentativasRecarregamento = 0;
+                
+                // Adicionar botão "Carregar Mais" se não existir
+                adicionarBotaoCarregarMais();
+                
+                // Salvar logs no cache local
+                salvarLogsNoCache(registros);
+                
+                // Atualizar a indicação da fonte de dados
+                if (!atualizacaoEmSegundoPlano) {
+                    atualizarBadgeFonteDados('firebase');
+                }
+            } else {
+                console.log('Nenhum registro encontrado');
+                if (tentativasRecarregamento < MAX_TENTATIVAS) {
+                    tentativasRecarregamento++;
+                    setTimeout(() => buscarRegistrosDoFirebase(atualizacaoEmSegundoPlano), 1000);
+                } else {
+                    alert('Não foi possível encontrar registros de operações.');
+                    if (!atualizacaoEmSegundoPlano) {
+                        atualizarBadgeFonteDados('erro');
+                    }
+                }
+            }
+        })
+        .catch(error => {
+            console.error('Erro ao buscar registros:', error);
+            if (!atualizacaoEmSegundoPlano) {
+                alert(`Erro ao buscar registros: ${error.message}`);
+                atualizarBadgeFonteDados('erro');
+            }
+        });
+}
+
+// Extrair valores únicos para os filtros
+function extrairValoresUnicosParaFiltros(registros) {
                 registros.forEach(registro => {
                     // Extrair todas as possíveis lojas
                     const lojasExtrair = [
@@ -1067,34 +1175,205 @@ function buscarRegistros() {
                 });
                 
                 console.log(`Extraídos ${todasLojas.size} valores de loja e ${todasMaquinas.size} valores de máquina`);
+}
+
+// Função para salvar os logs no cache local
+function salvarLogsNoCache(logs) {
+    try {
+        console.log(`Salvando ${logs.length} registros no cache local`);
+        
+        // Converter dados para um formato mais adequado para cache
+        // Neste caso, precisamos converter objetos timestamp em objetos serializáveis
+        const logsSerializaveis = logs.map(log => {
+            const logSerializavel = { ...log };
                 
-                // Popular os seletores de filtro
-                popularSeletoresFiltro();
+            // Se for um timestamp do Firestore, converter para string ISO
+            if (logSerializavel.timestamp && typeof logSerializavel.timestamp === 'object') {
+                if (logSerializavel.timestamp.seconds) {
+                    // Timestamp do Firestore
+                    const data = new Date(logSerializavel.timestamp.seconds * 1000 + 
+                                         (logSerializavel.timestamp.nanoseconds || 0) / 1000000);
+                    logSerializavel.timestamp = data.toISOString();
+                } else if (logSerializavel.timestamp instanceof Date) {
+                    // Objeto Date
+                    logSerializavel.timestamp = logSerializavel.timestamp.toISOString();
+                }
+            }
+            
+            return logSerializavel;
+        });
+        
+        // Salvar os dados serializado no localStorage
+        localStorage.setItem(CACHE_KEY_LOGS, JSON.stringify(logsSerializaveis));
+        
+        // Salvar o timestamp atual
+        localStorage.setItem(CACHE_KEY_LOGS_TIMESTAMP, Date.now().toString());
+        
+        console.log('Registros salvos no cache com sucesso');
+    } catch (error) {
+        console.error('Erro ao salvar registros no cache:', error);
+    }
+}
+
+// Função para carregar os logs do cache
+function carregarLogsDoCache() {
+    try {
+        // Verificar se existe cache
+        const cachedTimestamp = localStorage.getItem(CACHE_KEY_LOGS_TIMESTAMP);
+        if (!cachedTimestamp) return null;
+        
+        // Verificar se o cache está expirado
+        const timestamp = parseInt(cachedTimestamp);
+        const agora = Date.now();
+        if (agora - timestamp > CACHE_EXPIRY_TIME) {
+            console.log('Cache de registros expirado, será recarregado do Firebase');
+            return null;
+        }
+        
+        // Carregar os dados dos registros
+        const cachedLogs = localStorage.getItem(CACHE_KEY_LOGS);
+        if (!cachedLogs) return null;
+        
+        // Converter os dados JSON para objeto
+        const logs = JSON.parse(cachedLogs);
+        
+        // Converter timestamps de volta para objetos Date
+        const logsProcessados = logs.map(log => {
+            // Se o timestamp for string, converter para Date
+            if (log.timestamp && typeof log.timestamp === 'string') {
+                log.timestamp = new Date(log.timestamp);
+            }
+            return log;
+        });
+        
+        console.log(`Carregados ${logsProcessados.length} registros do cache`);
                 
-                // Processar e exibir os registros na tabela
-                const registrosProcessados = processarRegistros(registros);
-                
-                // Renderizar os registros
-                renderizarRegistros(registrosProcessados);
-                
-                tentativasRecarregamento = 0;
-                
-                // Adicionar botão "Carregar Mais" se não existir
-                adicionarBotaoCarregarMais();
+        // Atualizar a indicação da fonte de dados
+        const tempoDesdeAtualizacao = agora - timestamp;
+        atualizarBadgeFonteDados('cache', tempoDesdeAtualizacao);
+        
+        return logsProcessados;
+    } catch (error) {
+        console.error('Erro ao carregar registros do cache:', error);
+        return null;
+    }
+}
+
+// Função para atualizar a badge de fonte de dados
+function atualizarBadgeFonteDados(fonte) {
+    // Obtém o elemento da badge e do texto
+    const badgeElement = document.getElementById('data-source-badge');
+    const textElement = document.getElementById('data-source-text');
+    
+    if (!badgeElement || !textElement) return;
+    
+    // Mostrar a badge (remove a classe d-none se estiver presente)
+    badgeElement.classList.remove('d-none');
+    
+    // Atualiza classe e texto de acordo com a fonte
+    if (fonte === 'cache') {
+        badgeElement.className = 'badge bg-warning text-dark';
+        textElement.textContent = 'Dados do Cache';
+    } else if (fonte === 'firebase') {
+        badgeElement.className = 'badge bg-primary text-white';
+        textElement.textContent = 'Dados do Firebase';
+    } else if (fonte === 'erro') {
+        badgeElement.className = 'badge bg-danger text-white';
+        textElement.textContent = 'Erro ao carregar dados';
+    }
+}
+
+// Função para formatar o tempo relativo (quanto tempo atrás)
+function formatarTempoRelativo(ms) {
+    const segundos = Math.floor(ms / 1000);
+    const minutos = Math.floor(segundos / 60);
+    const horas = Math.floor(minutos / 60);
+    
+    if (horas > 0) {
+        return `${horas}h atrás`;
+    } else if (minutos > 0) {
+        return `${minutos}min atrás`;
         } else {
-                console.log('Nenhum registro encontrado');
-                if (tentativasRecarregamento < MAX_TENTATIVAS) {
-                    tentativasRecarregamento++;
-                    setTimeout(buscarRegistros, 1000);
-    } else {
-                    alert('Não foi possível encontrar registros de operações.');
+        return `${segundos}s atrás`;
+    }
+}
+
+// Função para salvar os filtros atuais no localStorage
+function salvarFiltrosLogs() {
+    try {
+        // Obter os valores atuais dos filtros
+        const filtros = {
+            loja: filtroLoja ? filtroLoja.value : '',
+            operacao: filtroOperacao ? filtroOperacao.value : '',
+            maquina: filtroMaquina ? filtroMaquina.value : '',
+            data: document.getElementById('filtroData') ? document.getElementById('filtroData').value : '',
+            pesquisa: document.getElementById('filtroPesquisa') ? document.getElementById('filtroPesquisa').value : ''
+        };
+        
+        // Salvar no localStorage
+        localStorage.setItem(FILTROS_LOGS_KEY, JSON.stringify(filtros));
+        console.log('Filtros de logs salvos:', filtros);
+    } catch (error) {
+        console.error('Erro ao salvar filtros de logs:', error);
+    }
+}
+
+// Função para carregar os filtros salvos
+function carregarFiltrosSalvosLogs() {
+    try {
+        const filtrosSalvos = localStorage.getItem(FILTROS_LOGS_KEY);
+        if (!filtrosSalvos) return;
+        
+        const filtros = JSON.parse(filtrosSalvos);
+        console.log('Filtros de logs carregados:', filtros);
+        
+        // Aplicar os filtros salvos aos elementos
+        if (filtroLoja && filtros.loja) filtroLoja.value = filtros.loja;
+        if (filtroOperacao && filtros.operacao) filtroOperacao.value = filtros.operacao;
+        if (filtroMaquina && filtros.maquina) filtroMaquina.value = filtros.maquina;
+        
+        const filtroData = document.getElementById('filtroData');
+        if (filtroData && filtros.data) filtroData.value = filtros.data;
+        
+        const filtroPesquisa = document.getElementById('filtroPesquisa');
+        if (filtroPesquisa && filtros.pesquisa) {
+            filtroPesquisa.value = filtros.pesquisa;
+            if (dataTable) {
+                dataTable.search(filtros.pesquisa).draw();
         }
     }
-        })
-        .catch(error => {
-            console.error('Erro ao buscar registros:', error);
-            alert(`Erro ao buscar registros: ${error.message}`);
+    } catch (error) {
+        console.error('Erro ao carregar filtros de logs:', error);
+    }
+}
+
+// Função para limpar o cache de logs
+function limparCacheLogs() {
+    try {
+        localStorage.removeItem(CACHE_KEY_LOGS);
+        localStorage.removeItem(CACHE_KEY_LOGS_TIMESTAMP);
+        console.log('Cache de logs limpo com sucesso');
+        
+        // Recarregar os dados do Firebase
+        buscarRegistrosDoFirebase();
+        
+        // Notificar o usuário
+        Swal.fire({
+            title: 'Cache Limpo',
+            text: 'O cache de registros foi limpo com sucesso.',
+            icon: 'success',
+            confirmButtonText: 'OK'
         });
+    } catch (error) {
+        console.error('Erro ao limpar cache de logs:', error);
+        
+        Swal.fire({
+            title: 'Erro',
+            text: 'Ocorreu um erro ao limpar o cache de registros.',
+            icon: 'error',
+            confirmButtonText: 'OK'
+        });
+    }
 }
 
 // Função para adicionar botão "Carregar Mais"
@@ -2042,6 +2321,489 @@ function carregarTodosRegistros() {
         });
 }
 
+// Função para carregar dados de status_machine do Firebase
+function carregarStatusMachine(forceRefresh = false) {
+    console.log('Carregando dados de status_machine...');
+    
+    // Mostrar spinner na tabela
+    const statusMachineTableBody = document.getElementById('statusMachineTableBody');
+    if (statusMachineTableBody) {
+        statusMachineTableBody.innerHTML = `
+            <tr>
+                <td colspan="6" class="text-center py-4">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Carregando...</span>
+                    </div>
+                    <p class="mt-2">Carregando dados de status...</p>
+                </td>
+            </tr>
+        `;
+    }
+    
+    // Verificar se há dados em cache e se não estamos forçando uma atualização
+    if (!forceRefresh) {
+        const cachedData = carregarStatusMachineDoCache();
+        if (cachedData && cachedData.length > 0) {
+            console.log(`Carregados ${cachedData.length} registros de status_machine do cache`);
+            processarDadosStatusMachine(cachedData);
+            return;
+        }
+    }
+    
+    // Buscar no Firebase
+    const database = firebase.database();
+    const lojas = database.ref('/');
+    
+    lojas.once('value')
+        .then(snapshot => {
+            const dados = snapshot.val() || {};
+            const statusMachineArray = [];
+            
+            // Percorrer todas as lojas
+            for (const lojaId in dados) {
+                // Verificar se a loja tem o nó status
+                if (dados[lojaId] && dados[lojaId].status) {
+                    const statusData = dados[lojaId].status;
+                    
+                    // Adicionar loja ao conjunto de lojas com status
+                    lojasComStatus.add(lojaId);
+                    
+                    // Processar lavadoras
+                    if (statusData.lavadoras) {
+                        for (const id in statusData.lavadoras) {
+                            statusMachineArray.push({
+                                loja: lojaId,
+                                tipo: 'Lavadora',
+                                id: id,
+                                status: statusData.lavadoras[id] || 'desconhecido',
+                                lastUpdate: Date.now(), // Timestamp atual como referência
+                                detalhes: {
+                                    tipo: 'lavadora',
+                                    historico: [] // Inicialmente sem histórico
+                                }
+                            });
+                        }
+                    }
+                    
+                    // Processar secadoras
+                    if (statusData.secadoras) {
+                        for (const id in statusData.secadoras) {
+                            statusMachineArray.push({
+                                loja: lojaId,
+                                tipo: 'Secadora',
+                                id: id,
+                                status: statusData.secadoras[id] || 'desconhecido',
+                                lastUpdate: Date.now(), // Timestamp atual como referência
+                                detalhes: {
+                                    tipo: 'secadora',
+                                    historico: [] // Inicialmente sem histórico
+                                }
+                            });
+                        }
+                    }
+                    
+                    // Processar dosadoras
+                    if (statusData.dosadoras) {
+                        for (const id in statusData.dosadoras) {
+                            statusMachineArray.push({
+                                loja: lojaId,
+                                tipo: 'Dosadora',
+                                id: id,
+                                status: statusData.dosadoras[id] || 'desconhecido',
+                                lastUpdate: Date.now(), // Timestamp atual como referência
+                                detalhes: {
+                                    tipo: 'dosadora',
+                                    historico: [] // Inicialmente sem histórico
+                                }
+                            });
+                        }
+                    }
+                    
+                    // Processar ar condicionado, se existir
+                    if (statusData.ar_condicionado) {
+                        statusMachineArray.push({
+                            loja: lojaId,
+                            tipo: 'Ar-Condicionado',
+                            id: 'AC-01',
+                            status: statusData.ar_condicionado || 'desconhecido',
+                            lastUpdate: Date.now(), // Timestamp atual como referência
+                            detalhes: {
+                                tipo: 'ar_condicionado',
+                                historico: [] // Inicialmente sem histórico
+                            }
+                        });
+                    }
+                }
+            }
+            
+            console.log(`Encontrados ${statusMachineArray.length} registros de status_machine`);
+            
+            // Salvar os dados em cache
+            salvarStatusMachineNoCache(statusMachineArray);
+            
+            // Processar e exibir os dados
+            processarDadosStatusMachine(statusMachineArray);
+        })
+        .catch(error => {
+            console.error('Erro ao carregar dados de status_machine:', error);
+            
+            if (statusMachineTableBody) {
+                statusMachineTableBody.innerHTML = `
+                    <tr>
+                        <td colspan="6" class="text-center py-4">
+                            <div class="alert alert-danger">
+                                <i class="fas fa-exclamation-circle me-2"></i>
+                                Erro ao carregar dados: ${error.message}
+                            </div>
+                        </td>
+                    </tr>
+                `;
+            }
+        });
+}
+
+// Função para salvar dados de status_machine no cache
+function salvarStatusMachineNoCache(dados) {
+    try {
+        localStorage.setItem(CACHE_KEY_STATUS_MACHINE, JSON.stringify(dados));
+        localStorage.setItem(CACHE_KEY_STATUS_MACHINE_TIMESTAMP, Date.now().toString());
+        console.log(`${dados.length} registros de status_machine salvos no cache`);
+    } catch (error) {
+        console.error('Erro ao salvar status_machine no cache:', error);
+    }
+}
+
+// Função para carregar dados de status_machine do cache
+function carregarStatusMachineDoCache() {
+    try {
+        // Verificar se existe cache
+        const cachedTimestamp = localStorage.getItem(CACHE_KEY_STATUS_MACHINE_TIMESTAMP);
+        if (!cachedTimestamp) return null;
+        
+        // Verificar se o cache está expirado
+        const timestamp = parseInt(cachedTimestamp);
+        const agora = Date.now();
+        if (agora - timestamp > CACHE_EXPIRY_TIME) {
+            console.log('Cache de status_machine expirado, será recarregado do Firebase');
+            return null;
+        }
+        
+        // Carregar os dados
+        const cachedData = localStorage.getItem(CACHE_KEY_STATUS_MACHINE);
+        if (!cachedData) return null;
+        
+        // Converter para objeto
+        return JSON.parse(cachedData);
+    } catch (error) {
+        console.error('Erro ao carregar status_machine do cache:', error);
+        return null;
+    }
+}
+
+// Função para processar e exibir dados de status_machine
+function processarDadosStatusMachine(dados) {
+    // Armazenar os dados globalmente
+    statusMachineData = dados;
+    
+    // Inicialmente, não aplicamos filtros
+    filteredStatusMachineData = [...dados];
+    
+    // Atualizar seletores de filtro
+    atualizarSeletoresStatusMachine();
+    
+    // Renderizar a tabela
+    renderizarTabelaStatusMachine(filteredStatusMachineData);
+}
+
+// Função para atualizar os seletores de filtro do status_machine
+function atualizarSeletoresStatusMachine() {
+    const lojaFilter = document.getElementById('statusMachineLojaFilter');
+    if (!lojaFilter) return;
+    
+    // Limpar opções existentes
+    lojaFilter.innerHTML = '<option value="">Todas as Lojas</option>';
+    
+    // Adicionar lojas únicas
+    const lojas = Array.from(lojasComStatus).sort();
+    lojas.forEach(loja => {
+        const option = document.createElement('option');
+        option.value = loja;
+        option.textContent = loja;
+        lojaFilter.appendChild(option);
+    });
+}
+
+// Função para aplicar filtros aos dados de status_machine
+function aplicarFiltrosStatusMachine() {
+    const lojaFilter = document.getElementById('statusMachineLojaFilter');
+    const statusFilter = document.getElementById('statusMachineFilter');
+    
+    if (!lojaFilter || !statusFilter) return;
+    
+    const lojaValue = lojaFilter.value;
+    const statusValue = statusFilter.value;
+    
+    // Aplicar filtros
+    filteredStatusMachineData = statusMachineData.filter(item => {
+        // Filtro de loja
+        if (lojaValue && item.loja !== lojaValue) {
+            return false;
+        }
+        
+        // Filtro de status
+        if (statusValue && item.status !== statusValue) {
+            return false;
+        }
+        
+        return true;
+    });
+    
+    // Renderizar tabela com dados filtrados
+    renderizarTabelaStatusMachine(filteredStatusMachineData);
+}
+
+// Função para renderizar a tabela de status_machine
+function renderizarTabelaStatusMachine(dados) {
+    const tbody = document.getElementById('statusMachineTableBody');
+    if (!tbody) return;
+    
+    // Limpar tabela
+    tbody.innerHTML = '';
+    
+    // Se não houver dados
+    if (!dados || dados.length === 0) {
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="6" class="text-center py-4">
+                    <div class="alert alert-info">
+                        <i class="fas fa-info-circle me-2"></i>
+                        Nenhum dado encontrado.
+                    </div>
+                </td>
+            </tr>
+        `;
+        return;
+    }
+    
+    // Adicionar linhas à tabela
+    dados.forEach(item => {
+        const tr = document.createElement('tr');
+        
+        // Status formata na cor correspondente
+        const statusHtml = item.status === 'online' ? 
+            `<span class="badge bg-success">Online</span>` : 
+            item.status === 'offline' ? 
+            `<span class="badge bg-danger">Offline</span>` : 
+            item.status === 'liberando' || item.status === 'processando' ? 
+            `<span class="badge bg-info">Processando</span>` : 
+            `<span class="badge bg-secondary">${item.status}</span>`;
+        
+        // Formatar data
+        const dataHora = formatarTempoRelativo(Date.now() - item.lastUpdate);
+        
+        tr.innerHTML = `
+            <td>${item.loja}</td>
+            <td>${item.tipo}</td>
+            <td>${item.id}</td>
+            <td>${statusHtml}</td>
+            <td>${dataHora}</td>
+            <td>
+                <button class="btn btn-sm btn-outline-info view-machine-details" data-loja="${item.loja}" data-tipo="${item.tipo}" data-id="${item.id}">
+                    <i class="fas fa-eye"></i>
+                </button>
+            </td>
+        `;
+        
+        tbody.appendChild(tr);
+    });
+    
+    // Adicionar eventos aos botões de visualizar detalhes
+    document.querySelectorAll('.view-machine-details').forEach(btn => {
+        btn.addEventListener('click', function() {
+            const loja = this.getAttribute('data-loja');
+            const tipo = this.getAttribute('data-tipo');
+            const id = this.getAttribute('data-id');
+            
+            mostrarDetalhesMachine(loja, tipo, id);
+        });
+    });
+}
+
+// Função para mostrar detalhes de uma máquina
+function mostrarDetalhesMachine(loja, tipo, id) {
+    console.log(`Exibindo detalhes da máquina: ${tipo} ${id} da loja ${loja}`);
+    
+    // Encontrar os dados da máquina
+    const machine = statusMachineData.find(item => 
+        item.loja === loja && item.tipo === tipo && item.id === id
+    );
+    
+    if (!machine) {
+        console.error('Máquina não encontrada');
+        return;
+    }
+    
+    // Preencher os campos do modal
+    document.getElementById('detailLoja').textContent = machine.loja;
+    document.getElementById('detailTipo').textContent = machine.tipo;
+    document.getElementById('detailId').textContent = machine.id;
+    
+    // Status formata na cor correspondente
+    const statusEl = document.getElementById('detailStatus');
+    if (statusEl) {
+        statusEl.innerHTML = machine.status === 'online' ? 
+            `<span class="badge bg-success">Online</span>` : 
+            machine.status === 'offline' ? 
+            `<span class="badge bg-danger">Offline</span>` : 
+            machine.status === 'liberando' || machine.status === 'processando' ? 
+            `<span class="badge bg-info">Processando</span>` : 
+            `<span class="badge bg-secondary">${machine.status}</span>`;
+    }
+    
+    // Última atualização
+    document.getElementById('detailLastUpdate').textContent = formatarTempoRelativo(Date.now() - machine.lastUpdate);
+    
+    // Dados adicionais
+    const additionalDataEl = document.getElementById('detailAdditionalData');
+    if (additionalDataEl) {
+        additionalDataEl.innerHTML = `<pre>${JSON.stringify(machine.detalhes, null, 2)}</pre>`;
+    }
+    
+    // Histórico (ainda sem dados, apenas exemplo)
+    const historyBody = document.getElementById('detailHistoryBody');
+    if (historyBody) {
+        if (machine.detalhes.historico && machine.detalhes.historico.length > 0) {
+            historyBody.innerHTML = machine.detalhes.historico
+                .map(hist => `
+                    <tr>
+                        <td>${formatarData(hist.timestamp)}</td>
+                        <td><span class="badge bg-${hist.status === 'online' ? 'success' : 'danger'}">${hist.status}</span></td>
+                        <td>${hist.evento || '-'}</td>
+                    </tr>
+                `).join('');
+        } else {
+            historyBody.innerHTML = `
+                <tr>
+                    <td colspan="3" class="text-center py-3">
+                        <i class="text-muted">Nenhum histórico disponível</i>
+                    </td>
+                </tr>
+            `;
+        }
+    }
+    
+    // Configurar botão de refresh
+    const refreshBtn = document.getElementById('refreshMachineDetail');
+    if (refreshBtn) {
+        refreshBtn.onclick = function() {
+            buscarDetalhesAtualizados(loja, tipo, id);
+        };
+    }
+    
+    // Exibir o modal
+    if (machineStatusDetailModal) {
+        machineStatusDetailModal.show();
+    }
+}
+
+// Função para buscar detalhes atualizados de uma máquina
+function buscarDetalhesAtualizados(loja, tipo, id) {
+    console.log(`Buscando detalhes atualizados: ${tipo} ${id} da loja ${loja}`);
+    
+    // Mostrar spinner enquanto carrega
+    document.getElementById('detailAdditionalData').innerHTML = `
+        <div class="text-center py-3">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Carregando...</span>
+            </div>
+            <p class="mt-2">Atualizando dados...</p>
+        </div>
+    `;
+    
+    // Buscar dados atualizados no Firebase
+    const tipoRef = tipo === 'Lavadora' ? 'lavadoras' : 
+                  tipo === 'Secadora' ? 'secadoras' : 
+                  tipo === 'Dosadora' ? 'dosadoras' : 'ar_condicionado';
+    
+    const database = firebase.database();
+    const machineRef = database.ref(`/${loja}/status/${tipoRef}/${id}`);
+    
+    machineRef.once('value')
+        .then(snapshot => {
+            const dadosAtualizados = snapshot.val();
+            
+            // Atualizar o status_machine nos dados
+            const machineIndex = statusMachineData.findIndex(item => 
+                item.loja === loja && item.tipo === tipo && item.id === id
+            );
+            
+            if (machineIndex !== -1) {
+                // Atualizar o status
+                statusMachineData[machineIndex].status = dadosAtualizados || 'desconhecido';
+                statusMachineData[machineIndex].lastUpdate = Date.now();
+                
+                // Adicionar ao histórico
+                if (!statusMachineData[machineIndex].detalhes.historico) {
+                    statusMachineData[machineIndex].detalhes.historico = [];
+                }
+                
+                statusMachineData[machineIndex].detalhes.historico.unshift({
+                    timestamp: Date.now(),
+                    status: dadosAtualizados || 'desconhecido',
+                    evento: 'Atualização manual'
+                });
+                
+                // Limitar histórico a 10 entradas
+                if (statusMachineData[machineIndex].detalhes.historico.length > 10) {
+                    statusMachineData[machineIndex].detalhes.historico = 
+                        statusMachineData[machineIndex].detalhes.historico.slice(0, 10);
+                }
+                
+                // Salvar no cache
+                salvarStatusMachineNoCache(statusMachineData);
+                
+                // Filtrar dados novamente para atualizar a visualização
+                aplicarFiltrosStatusMachine();
+                
+                // Mostrar detalhes atualizados
+                mostrarDetalhesMachine(loja, tipo, id);
+            }
+        })
+        .catch(error => {
+            console.error('Erro ao atualizar detalhes:', error);
+            document.getElementById('detailAdditionalData').innerHTML = `
+                <div class="alert alert-danger">
+                    <i class="fas fa-exclamation-circle me-2"></i>
+                    Erro ao atualizar: ${error.message}
+                </div>
+            `;
+        });
+}
+
+// Função para limpar cache
+function limparCache() {
+    try {
+        // Limpar cache de logs
+        localStorage.removeItem(CACHE_KEY_LOGS);
+        localStorage.removeItem(CACHE_KEY_LOGS_TIMESTAMP);
+        
+        // Limpar cache de status_machine
+        localStorage.removeItem(CACHE_KEY_STATUS_MACHINE);
+        localStorage.removeItem(CACHE_KEY_STATUS_MACHINE_TIMESTAMP);
+        
+        // Mostrar toast de sucesso
+        showToast('Cache limpo com sucesso!', 'success');
+        
+        // Atualizar a badge de fonte de dados
+        atualizarBadgeFonteDados('firebase');
+        
+        console.log('Cache limpo com sucesso');
+    } catch (error) {
+        console.error('Erro ao limpar cache:', error);
+        showToast('Erro ao limpar cache: ' + error.message, 'error');
+    }
+}
+
 // Inicializar a página quando o documento estiver pronto
 document.addEventListener('DOMContentLoaded', function() {
     // Fallback para garantir que o spinner seja ocultado após um tempo limite
@@ -2092,7 +2854,10 @@ document.addEventListener('DOMContentLoaded', function() {
     });
     
     // Configurar botão de logout
-    document.getElementById('btnLogout').addEventListener('click', function() {
+    const btnLogout = document.getElementById('btnLogout');
+    if (btnLogout) {
+        btnLogout.addEventListener('click', function(e) {
+            e.preventDefault();
         firebase.auth().signOut()
             .then(() => {
                 window.location.href = 'login.html';
@@ -2102,6 +2867,135 @@ document.addEventListener('DOMContentLoaded', function() {
                 alert('Erro ao fazer logout. Tente novamente.');
             });
     });
+    }
+    
+    // Configurar botão Meu Perfil
+    const btnUserProfile = document.getElementById('user-profile');
+    if (btnUserProfile) {
+        btnUserProfile.addEventListener('click', function(e) {
+            e.preventDefault();
+            // Verificar se o usuário está autenticado
+            const user = firebase.auth().currentUser;
+            if (user) {
+                // Exibir modal com informações do usuário ou redirecionar para página de perfil
+                Swal.fire({
+                    title: 'Perfil do Usuário',
+                    html: `
+                        <div class="text-start">
+                            <p><strong>Nome:</strong> ${user.displayName || 'Não definido'}</p>
+                            <p><strong>E-mail:</strong> ${user.email}</p>
+                            <p><strong>Conta criada em:</strong> ${user.metadata.creationTime ? new Date(user.metadata.creationTime).toLocaleString() : 'Não disponível'}</p>
+                            <p><strong>Último login:</strong> ${user.metadata.lastSignInTime ? new Date(user.metadata.lastSignInTime).toLocaleString() : 'Não disponível'}</p>
+                        </div>
+                    `,
+                    icon: 'info',
+                    confirmButtonText: 'Fechar'
+                });
+            } else {
+                // Se não estiver autenticado, redirecionar para login
+                window.location.href = 'login.html';
+            }
+        });
+    }
+    
+    // Configurar botão Alterar Senha
+    const btnChangePassword = document.getElementById('change-password');
+    if (btnChangePassword) {
+        btnChangePassword.addEventListener('click', function(e) {
+            e.preventDefault();
+            // Verificar se o usuário está autenticado
+            const user = firebase.auth().currentUser;
+            if (user) {
+                // Exibir modal para alteração de senha
+                Swal.fire({
+                    title: 'Alterar Senha',
+                    html: `
+                        <input type="password" id="swal-current-password" class="swal2-input" placeholder="Senha atual">
+                        <input type="password" id="swal-new-password" class="swal2-input" placeholder="Nova senha">
+                        <input type="password" id="swal-confirm-password" class="swal2-input" placeholder="Confirmar nova senha">
+                    `,
+                    focusConfirm: false,
+                    showCancelButton: true,
+                    confirmButtonText: 'Alterar Senha',
+                    cancelButtonText: 'Cancelar',
+                    preConfirm: () => {
+                        const currentPassword = document.getElementById('swal-current-password').value;
+                        const newPassword = document.getElementById('swal-new-password').value;
+                        const confirmPassword = document.getElementById('swal-confirm-password').value;
+                        
+                        // Validar entradas
+                        if (!currentPassword || !newPassword || !confirmPassword) {
+                            Swal.showValidationMessage('Todos os campos são obrigatórios');
+                            return false;
+                        }
+                        
+                        if (newPassword !== confirmPassword) {
+                            Swal.showValidationMessage('As senhas não coincidem');
+                            return false;
+                        }
+                        
+                        if (newPassword.length < 6) {
+                            Swal.showValidationMessage('A nova senha deve ter pelo menos 6 caracteres');
+                            return false;
+                        }
+                        
+                        return { currentPassword, newPassword };
+                    }
+                }).then((result) => {
+                    if (result.isConfirmed) {
+                        // Atualizar a senha do usuário
+                        const credential = firebase.auth.EmailAuthProvider.credential(
+                            user.email, 
+                            result.value.currentPassword
+                        );
+                        
+                        // Reautenticar o usuário
+                        user.reauthenticateWithCredential(credential)
+                            .then(() => {
+                                // Após reautenticação, alterar a senha
+                                return user.updatePassword(result.value.newPassword);
+                            })
+                            .then(() => {
+                                Swal.fire(
+                                    'Senha Alterada',
+                                    'Sua senha foi alterada com sucesso.',
+                                    'success'
+                                );
+                            })
+                            .catch(error => {
+                                console.error('Erro ao alterar senha:', error);
+                                let mensagemErro = 'Erro ao alterar senha. Tente novamente.';
+                                
+                                // Mensagens de erro personalizadas
+                                if (error.code === 'auth/wrong-password') {
+                                    mensagemErro = 'Senha atual incorreta. Tente novamente.';
+                                } else if (error.code === 'auth/weak-password') {
+                                    mensagemErro = 'A nova senha é muito fraca. Use uma senha mais forte.';
+                                }
+                                
+                                Swal.fire(
+                                    'Erro',
+                                    mensagemErro,
+                                    'error'
+                                );
+                            });
+                    }
+                });
+            } else {
+                // Se não estiver autenticado, redirecionar para login
+                window.location.href = 'login.html';
+            }
+        });
+    }
+    
+    // Configurar botão para limpar cache, se existir
+    const btnLimparCache = document.getElementById('clear-cache');
+    if (btnLimparCache) {
+        btnLimparCache.addEventListener('click', function(e) {
+            e.preventDefault();
+            limparCache();
+        });
+    }
     
     // Configurar botão para carregar todos os registros
     const btnCarregarTodos = document.getElementById('btnCarregarTodos');
@@ -2110,8 +3004,177 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     // Adicionar evento ao botão de recarregar tabela
+    if (btnRecarregarTabela) {
     btnRecarregarTabela.addEventListener('click', () => {
         console.log('Solicitada recarga manual da tabela');
-        buscarRegistros();
+            buscarRegistrosDoFirebase();
     });
+    }
+    
+    // Adicionar evento ao botão de aplicar filtros
+    if (btnAplicarFiltros) {
+        btnAplicarFiltros.addEventListener('click', function() {
+            console.log('Botão Aplicar Filtros clicado');
+            aplicarFiltros();
+            salvarFiltrosLogs();
+    });
+    }
+    
+    // Carregar filtros salvos
+    carregarFiltrosSalvosLogs();
+    
+    // Inicializar modais de Status de Máquinas
+    const statusMachinesModalElement = document.getElementById('statusMachinesModal');
+    if (statusMachinesModalElement) {
+        statusMachineModal = new bootstrap.Modal(statusMachinesModalElement);
+    }
+    
+    const machineStatusDetailModalElement = document.getElementById('machineStatusDetailModal');
+    if (machineStatusDetailModalElement) {
+        machineStatusDetailModal = new bootstrap.Modal(machineStatusDetailModalElement);
+    }
+    
+    // Configurar botão de Status de Máquinas
+    const btnStatusMachines = document.getElementById('status-machines-btn');
+    if (btnStatusMachines) {
+        btnStatusMachines.addEventListener('click', function(e) {
+            e.preventDefault();
+            // Carregar dados antes de exibir o modal
+            carregarStatusMachine();
+            // Exibir o modal
+            if (statusMachineModal) {
+                statusMachineModal.show();
+            }
+        });
+    }
+    
+    // Configurar botões de filtro do Status de Máquinas
+    const applyStatusMachineFiltersBtn = document.getElementById('applyStatusMachineFilters');
+    if (applyStatusMachineFiltersBtn) {
+        applyStatusMachineFiltersBtn.addEventListener('click', function() {
+            aplicarFiltrosStatusMachine();
+        });
+    }
+    
+    const clearStatusMachineFiltersBtn = document.getElementById('clearStatusMachineFilters');
+    if (clearStatusMachineFiltersBtn) {
+        clearStatusMachineFiltersBtn.addEventListener('click', function() {
+            // Limpar os filtros
+            const lojaFilter = document.getElementById('statusMachineLojaFilter');
+            const statusFilter = document.getElementById('statusMachineFilter');
+            
+            if (lojaFilter) lojaFilter.value = '';
+            if (statusFilter) statusFilter.value = '';
+            
+            // Recarregar dados sem filtro
+            filteredStatusMachineData = [...statusMachineData];
+            renderizarTabelaStatusMachine(filteredStatusMachineData);
+        });
+    }
+    
+    // Configurar botão de atualizar status_machine
+    const refreshStatusMachineBtn = document.getElementById('refreshStatusMachine');
+    if (refreshStatusMachineBtn) {
+        refreshStatusMachineBtn.addEventListener('click', function() {
+            carregarStatusMachine(true); // forçar atualização
+        });
+    }
 });
+
+// Função para formatar tempo relativo (quantos minutos/horas atrás)
+function formatarTempoRelativo(diffMs) {
+    // Converter para segundos
+    const diffSec = Math.floor(diffMs / 1000);
+    
+    // Menos de 1 minuto
+    if (diffSec < 60) {
+        return 'Agora mesmo';
+    }
+    
+    // Menos de 1 hora
+    if (diffSec < 3600) {
+        const mins = Math.floor(diffSec / 60);
+        return `${mins} ${mins === 1 ? 'minuto' : 'minutos'} atrás`;
+    }
+    
+    // Menos de 1 dia
+    if (diffSec < 86400) {
+        const hours = Math.floor(diffSec / 3600);
+        return `${hours} ${hours === 1 ? 'hora' : 'horas'} atrás`;
+    }
+    
+    // Mais de 1 dia
+    const days = Math.floor(diffSec / 86400);
+    return `${days} ${days === 1 ? 'dia' : 'dias'} atrás`;
+}
+
+// Função para mostrar toast de notificação
+function showToast(message, type = 'info') {
+    // Verificar se o container de toast existe
+    let toastContainer = document.getElementById('toast-container');
+    
+    // Se não existir, criar um
+    if (!toastContainer) {
+        toastContainer = document.createElement('div');
+        toastContainer.id = 'toast-container';
+        toastContainer.className = 'position-fixed bottom-0 end-0 p-3';
+        toastContainer.style.zIndex = '11';
+        document.body.appendChild(toastContainer);
+    }
+    
+    // Criar um ID único para o toast
+    const toastId = `toast-${Date.now()}`;
+    
+    // Definir classe de cor baseada no tipo
+    let bgClass = 'bg-info';
+    let iconClass = 'fa-info-circle';
+    
+    switch (type) {
+        case 'success':
+            bgClass = 'bg-success';
+            iconClass = 'fa-check-circle';
+            break;
+        case 'error':
+            bgClass = 'bg-danger';
+            iconClass = 'fa-exclamation-circle';
+            break;
+        case 'warning':
+            bgClass = 'bg-warning';
+            iconClass = 'fa-exclamation-triangle';
+            break;
+    }
+    
+    // Criar o HTML do toast
+    const toastHTML = `
+        <div id="${toastId}" class="toast" role="alert" aria-live="assertive" aria-atomic="true">
+            <div class="toast-header ${bgClass} text-white">
+                <i class="fas ${iconClass} me-2"></i>
+                <strong class="me-auto">Notificação</strong>
+                <small>Agora</small>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="toast" aria-label="Close"></button>
+            </div>
+            <div class="toast-body">
+                ${message}
+            </div>
+        </div>
+    `;
+    
+    // Adicionar o toast ao container
+    toastContainer.innerHTML += toastHTML;
+    
+    // Inicializar o toast via Bootstrap
+    const toastElement = document.getElementById(toastId);
+    if (toastElement) {
+        const toast = new bootstrap.Toast(toastElement, {
+            autohide: true,
+            delay: 5000
+        });
+        
+        toast.show();
+        
+        // Remover o toast do DOM após ser fechado
+        toastElement.addEventListener('hidden.bs.toast', function() {
+            toastElement.remove();
+        });
+    }
+}

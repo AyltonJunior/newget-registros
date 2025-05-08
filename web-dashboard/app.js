@@ -1,6 +1,14 @@
 // Referência ao banco de dados do Firebase
 const database = firebase.database();
 
+// Constantes para o cache
+const CACHE_KEY_LOJAS = 'cached_lojas_data';
+const CACHE_KEY_TIMESTAMP = 'cached_lojas_timestamp';
+const CACHE_EXPIRY_TIME = 30 * 60 * 1000; // 30 minutos em milissegundos
+
+// Constantes para os filtros salvos
+const FILTERS_KEY = 'saved_lojas_filters';
+
 // Elementos do DOM
 const lojasTableBody = document.getElementById('lojas-table-body');
 const loadingRow = document.getElementById('loading-row');
@@ -63,6 +71,7 @@ const affectedStoresCount = document.getElementById('affected-stores-count');
 let todasLojas = [];
 let lojasFiltradas = [];
 let lojasTable; // Para a instância do DataTable
+let cacheUsado = false; // Flag para indicar se os dados vieram do cache
 
 // Mapa de regiões e estados do Brasil
 const estadosPorRegiao = {
@@ -109,6 +118,7 @@ const coordenadasEstados = {
     'SC': [-27.2423, -50.2189]
 };
 
+// Mapa de estados para nomes completos
 const estadosNomes = {
     'AC': 'Acre',
     'AL': 'Alagoas',
@@ -146,13 +156,10 @@ let mapMarkers = [];
 
 // Função para formatar a data
 function formatarData(timestamp) {
-    console.log("formatarData (app.js) - Valor original:", timestamp, typeof timestamp);
-    
     try {
         // Se for uma string, converter para número
         if (typeof timestamp === 'string') {
             timestamp = Number(timestamp);
-            console.log("Convertido de string para número:", timestamp);
         }
         
         // Se não for um número, tentar converter
@@ -162,13 +169,11 @@ function formatarData(timestamp) {
         
         // Verificar se é NaN após conversão
         if (isNaN(timestamp)) {
-            console.error("Timestamp inválido (NaN):", timestamp);
             return "Data inválida";
         }
         
         // Se o timestamp for pequeno demais ou grande demais, é provavelmente inválido
         if (timestamp <= 0) {
-            console.error("Timestamp negativo ou zero:", timestamp);
             return "Data inválida";
         }
         
@@ -176,19 +181,14 @@ function formatarData(timestamp) {
         const timestampDate = new Date(timestamp);
         const timestampYear = timestampDate.getFullYear();
         
-        console.log(`Convertido para data: ${timestampDate}, ano: ${timestampYear}`);
-        
         // Se o ano for 1970 ou uma data inválida, provavelmente está em segundos
         if (timestampYear === 1970 || timestampYear < 2010 || timestampYear > 2050) {
             // Tentar multiplicar por 1000 para converter de segundos para ms
             timestamp = timestamp * 1000;
-            console.log("Timestamp ajustado para ms:", timestamp);
             const newDate = new Date(timestamp);
-            console.log("Nova data após ajuste:", newDate);
             
             // Se ainda estiver em 1970, está realmente inválido
             if (newDate.getFullYear() < 2010) {
-                console.error("Timestamp inválido mesmo após ajuste");
                 return "Data inválida";
             }
             
@@ -197,7 +197,6 @@ function formatarData(timestamp) {
         
         return formatarDataAjustada(timestampDate);
     } catch (error) {
-        console.error("Erro ao formatar data:", error, "para timestamp:", timestamp);
         return "Data inválida";
     }
 }
@@ -224,53 +223,41 @@ function formatarDataAjustada(data) {
 
 // Função para determinar o status da loja
 function determinarStatus(loja) {
-    // Verifica se existe o nó de status
-    if (loja.pc_status && loja.pc_status.timestamp) {
-        let ultimaAtualizacao = loja.pc_status.timestamp;
-        console.log("determinarStatus (app.js) - timestamp original:", ultimaAtualizacao, typeof ultimaAtualizacao);
-        
-        // Se for uma string, converter para número
-        if (typeof ultimaAtualizacao === 'string') {
-            ultimaAtualizacao = Number(ultimaAtualizacao);
-            console.log("Convertido de string para número:", ultimaAtualizacao);
-        }
-        
-        // Se não for um número, tentar converter
-        if (typeof ultimaAtualizacao !== 'number') {
-            ultimaAtualizacao = parseInt(ultimaAtualizacao);
-            if (isNaN(ultimaAtualizacao)) {
-                console.error("Timestamp inválido em determinarStatus:", ultimaAtualizacao);
-                return { status: "Offline", classe: "bg-danger", indicador: "status-offline" };
-            }
-        }
-        
-        // CORREÇÃO PARA DATAS EM SEGUNDOS VS MILISSEGUNDOS:
-        const timestampDate = new Date(ultimaAtualizacao);
-        const timestampYear = timestampDate.getFullYear();
-        
-        // Se o ano da data for antes de 2010 ou após 2050, provavelmente está no formato errado
-        if (timestampYear < 2010 || timestampYear > 2050) {
-            // Multiplicamos por 1000 para converter de segundos para ms
-            ultimaAtualizacao = ultimaAtualizacao * 1000;
-            console.log("Timestamp ajustado em determinarStatus:", ultimaAtualizacao);
-        }
-        
+    // Verificar se temos heartbeat disponível para determinar o status
+    if (loja.heartbeat) {
         const agora = Date.now();
-        const diferenca = agora - ultimaAtualizacao;
+        const intervalo = loja.heartbeat_interval || 180; // Padrão 180s se não definido
+        const intervaloMs = intervalo * 1000;
+        const diferenca = agora - loja.heartbeat;
         
-        console.log("Timestamp atual:", agora, "Diferença:", diferenca, "ms", Math.floor(diferenca/1000/60), "minutos");
-        
-        // Se a última atualização foi há menos de 1 minuto, considera online
-        if (diferenca < 1 * 60 * 1000) {
+        // Se o último heartbeat é mais recente que o intervalo definido (com margem), está online
+        if (diferenca < intervaloMs * 1.5) { // 1.5x intervalo para dar margem
+            return { 
+                status: "Online", 
+                classe: "bg-success", 
+                indicador: "status-online" 
+            };
+        } else {
+            return { 
+                status: "Offline", 
+                classe: "bg-danger", 
+                indicador: "status-offline" 
+            };
+        }
+    }
+    
+    // Retornar diretamente o status recebido do Firebase, se não tiver heartbeat
+    if (loja.pc_status && loja.pc_status.status) {
+        // Usa o status definido diretamente no Firebase
+        if (loja.pc_status.status === "Online") {
             return { status: "Online", classe: "bg-success", indicador: "status-online" };
-        } 
-        // Caso contrário, considera offline
-        else {
+        } else {
             return { status: "Offline", classe: "bg-danger", indicador: "status-offline" };
         }
     }
     
-    return { status: "Offline", classe: "bg-danger", indicador: "status-offline" };
+    // Valor padrão se não houver status definido
+    return { status: "Indefinido", classe: "bg-secondary", indicador: "status-undefined" };
 }
 
 // Função para contar dispositivos
@@ -304,15 +291,47 @@ function contarDispositivos(loja, tipo) {
 
 // Função para obter a região e estado de uma loja
 function getLojaRegionAndState(codigo) {
-    // Exemplo de código: "SP05-001" (onde SP é o estado)
-    const match = codigo.match(/^([A-Z]{2})/);
-    if (match && match[1]) {
-        const estado = match[1];
+    // Para códigos que incluem o estado diretamente (ex: PB05, SP01, RN02, etc.)
+    const matchEstado = codigo.match(/^([A-Z]{2})/);
+    
+    if (matchEstado && matchEstado[1]) {
+        const estado = matchEstado[1];
         
         // Encontrar a região com base no estado
         for (const [regiao, estados] of Object.entries(estadosPorRegiao)) {
             if (estados.includes(estado)) {
                 return { regiao, estado };
+            }
+        }
+    }
+    
+    // Verificar prefixos especiais para lojas que não seguem o padrão de estado
+    if (codigo.startsWith('L')) {
+        // Se começa com L, tenta extrair o estado dos próximos dois caracteres
+        // Ex: LPB05-001, onde PB é o estado
+        const matchPrefixEstado = codigo.match(/^L([A-Z]{2})/);
+        if (matchPrefixEstado && matchPrefixEstado[1]) {
+            const estado = matchPrefixEstado[1];
+            
+            // Encontrar a região com base no estado
+            for (const [regiao, estados] of Object.entries(estadosPorRegiao)) {
+                if (estados.includes(estado)) {
+                    return { regiao, estado };
+                }
+            }
+        }
+    }
+    
+    // Análise de códigos numéricos ou outros padrões não identificados
+    // Neste caso, verificamos qualquer sequência de 2 letras no código
+    const generalMatch = codigo.match(/([A-Z]{2})/);
+    if (generalMatch && generalMatch[1]) {
+        const possibleEstado = generalMatch[1];
+        
+        // Verificar se essas letras correspondem a um estado válido
+        for (const [regiao, estados] of Object.entries(estadosPorRegiao)) {
+            if (estados.includes(possibleEstado)) {
+                return { regiao, estado: possibleEstado };
             }
         }
     }
@@ -511,98 +530,132 @@ function atualizarStatusLoja(codigo, loja) {
     }
 }
 
-// Função para criar uma linha da tabela para a loja
-function criarLinhaLoja(codigo, loja) {
-    // Clona o template
-    const row = lojaRowTemplate.content.cloneNode(true);
+// Função para criar uma nova linha de loja na tabela
+function criarLinhaTabelaLoja(codigo, loja) {
+    // Clone o template
+    const template = document.getElementById('loja-row-template');
+    if (!template) return null;
     
-    // Preenche os dados
+    const clone = document.importNode(template.content, true);
+    const row = clone.querySelector('tr');
+    
+    // Adiciona o atributo data-loja com o código da loja
+    row.setAttribute('data-loja', codigo);
+    
+    // Preenche os campos da linha
     row.querySelector('.loja-codigo').textContent = codigo;
     
-    // Região e Estado
-    const { regiao, estado } = getLojaRegionAndState(codigo);
-    row.querySelector('.loja-regiao').textContent = regiao.charAt(0).toUpperCase() + regiao.slice(1); // Capitaliza
-    row.querySelector('.loja-estado').textContent = estado;
+    // Pegar a região e o estado da loja e preencher os campos
+    let regiao = '';
+    let estado = '';
     
-    // Status
-    const statusInfo = determinarStatus(loja);
-    const statusTexto = row.querySelector('.loja-status');
+    if (loja.regiao) {
+        regiao = loja.regiao;
+    } else if (loja.regiao_formatada) {
+        regiao = loja.regiao_formatada;
+    }
     
-    // Última atualização
-    const timestamp = loja.pc_status ? loja.pc_status.timestamp : null;
-    const dataFormatada = formatarData(timestamp);
-    row.querySelector('.loja-atualizacao').textContent = dataFormatada;
+    if (loja.uf) {
+        estado = loja.uf;
+    } else if (loja.estado) {
+        estado = loja.estado;
+    }
     
-    // Atualiza o status baseado na verificação
-    const rowElement = row.querySelector('tr');
-    
-    if (statusInfo.status === "Online") {
-        statusTexto.textContent = "Online";
-        statusTexto.className = "text-success fw-medium loja-status";
+    // Se ainda estiver em branco, extrair a região e estado do código da loja
+    if (!regiao || !estado || regiao === '--' || estado === '--') {
+        const infoLoja = getLojaRegionAndState(codigo);
         
-        // Atualiza o indicador de status
-        const statusIndicator = row.querySelector('.status-indicator');
-        statusIndicator.classList.add('status-online');
-    } else {
-        statusTexto.textContent = "Offline";
-        statusTexto.className = "text-danger fw-medium loja-status";
+        if (!regiao || regiao === '--') {
+            // Formatar a região com primeira letra maiúscula para melhor apresentação
+            if (infoLoja.regiao && infoLoja.regiao !== 'indefinida') {
+                regiao = infoLoja.regiao.charAt(0).toUpperCase() + infoLoja.regiao.slice(1);
+            }
+        }
         
-        // Atualiza o indicador de status
-        const statusIndicator = row.querySelector('.status-indicator');
-        statusIndicator.classList.add('status-offline');
-        
-        // Destaca a linha como offline
-        if (rowElement) {
-            rowElement.classList.add('table-danger');
+        if (!estado || estado === '--') {
+            if (infoLoja.estado && infoLoja.estado !== 'indefinido') {
+                estado = infoLoja.estado.toUpperCase();
+            }
         }
     }
     
-    // Status do Totem
-    const motherboardStatusText = row.querySelector('.motherboard-status');
-    const motherboardIndicator = row.querySelector('.motherboard-indicator');
+    // Aplicar textos formatados aos elementos da tabela
+    const regiaoElement = row.querySelector('.loja-regiao');
+    const estadoElement = row.querySelector('.loja-estado');
     
-    // Se a loja estiver offline, exibir "indisponível" para o status do totem
-    if (statusInfo.status === "Offline") {
-        motherboardStatusText.textContent = "indisponível";
-        motherboardStatusText.className = "text-muted fw-medium motherboard-status";
-    } else if (loja.status_motherboard) {
-        const isMotherboardOn = loja.status_motherboard === 'ON';
-        motherboardStatusText.textContent = isMotherboardOn ? 'ON' : 'OFF';
-        motherboardStatusText.className = `${isMotherboardOn ? 'text-success' : 'text-danger'} fw-medium motherboard-status`;
-        
-        // Adiciona classe para o indicador de status do totem
-        if (isMotherboardOn) {
-            motherboardIndicator.classList.add('status-online');
-        } else {
-            motherboardIndicator.classList.add('status-offline');
-            
-            // Se a linha não está marcada como offline, marca com um destaque para o totem
-            if (rowElement && !rowElement.classList.contains('table-danger')) {
-                rowElement.classList.add('totem-offline-row');
-            }
+    regiaoElement.textContent = regiao || 'Indefinida';
+    estadoElement.textContent = estado || 'Indefinido';
+    
+    // Adicionar tooltip com nome completo do estado
+    if (estado && estado.length === 2) {
+        const nomeCompletoEstado = formatarNomeEstado(estado);
+        if (nomeCompletoEstado !== estado) {
+            estadoElement.setAttribute('title', nomeCompletoEstado);
+            estadoElement.classList.add('text-decoration-underline', 'cursor-help');
         }
-    } else {
-        motherboardStatusText.textContent = '--';
-        motherboardStatusText.className = 'text-muted fw-medium motherboard-status';
+    }
+    
+    // Obtem o status
+    const statusInfo = determinarStatus(loja);
+    
+    // Aplica o status visualmente
+        const statusIndicator = row.querySelector('.status-indicator');
+    const lojaStatus = row.querySelector('.loja-status');
+        
+    if (statusIndicator) {
+        statusIndicator.classList.add(statusInfo.indicador);
+        }
+    
+    if (lojaStatus) {
+        lojaStatus.textContent = statusInfo.status;
+        lojaStatus.classList.add(statusInfo.classe === 'bg-success' ? 'text-success' : 'text-danger');
+    }
+    
+    // Atualiza o status da motherboard se disponível
+    const motherboardStatus = loja.status_motherboard;
+    const motherboardIndicator = row.querySelector('.motherboard-indicator');
+    const motherboardText = row.querySelector('.motherboard-status');
+    
+    if (motherboardStatus) {
+        const isMotherboardOn = motherboardStatus === 'ON';
+        if (motherboardText) {
+            motherboardText.textContent = `Motherboard: ${motherboardStatus}`;
+            motherboardText.className = `motherboard-status small-text ${isMotherboardOn ? 'text-success' : 'text-danger'}`;
+        }
+        
+        if (motherboardIndicator) {
+            motherboardIndicator.className = `motherboard-indicator me-2 ${isMotherboardOn ? 'status-online' : 'status-offline'}`;
+        }
+    }
+    
+    // Atualiza a última atualização
+    const timestamp = loja.heartbeat || (loja.pc_status ? loja.pc_status.timestamp : null);
+    const atualizacaoElement = row.querySelector('.loja-atualizacao');
+    
+    if (atualizacaoElement && timestamp) {
+        const data = new Date(parseInt(timestamp));
+        const horas = data.getHours().toString().padStart(2, '0');
+        const minutos = data.getMinutes().toString().padStart(2, '0');
+        const segundos = data.getSeconds().toString().padStart(2, '0');
+        
+        atualizacaoElement.innerHTML = `
+            ${horas}:${minutos}:${segundos}
+            <span class="d-block small text-muted">Heartbeat</span>
+        `;
     }
     
     // Configura o botão de acesso
     const btnAcessar = row.querySelector('.btn-acessar');
+    if (btnAcessar) {
     btnAcessar.href = `loja.html?id=${codigo}`;
     
-    // Desabilitar botão se a loja estiver offline
-    if (statusInfo.status === "Offline") {
-        btnAcessar.classList.remove('btn-outline-primary');
-        btnAcessar.classList.add('btn-outline-secondary');
-        btnAcessar.disabled = true;
-        btnAcessar.style.pointerEvents = "none"; // Impede completamente a interação
-    }
-    
-    // Adiciona o código da loja como atributo data para facilitar atualizações
-    if (rowElement) {
-        rowElement.dataset.loja = codigo;
-        rowElement.dataset.regiao = regiao;
-        rowElement.dataset.estado = estado;
+        // Desabilitar o botão se a loja estiver offline
+        if (statusInfo.status === 'Offline') {
+            btnAcessar.classList.add('disabled');
+            btnAcessar.setAttribute('tabindex', '-1');
+            btnAcessar.setAttribute('aria-disabled', 'true');
+            btnAcessar.setAttribute('title', 'Loja offline');
+        }
     }
     
     return row;
@@ -708,7 +761,7 @@ function atualizarStatusLinhaLoja(codigo, loja) {
 
 // Função para filtrar lojas com base na pesquisa, região e estado
 function filtrarLojas() {
-    console.time('filtro-lojas'); // Para medir o desempenho
+    // Para medir o desempenho
     
     // Obter os valores dos filtros com verificação de nulo
     const termoPesquisa = searchInput?.value?.toLowerCase().trim() || '';
@@ -716,6 +769,9 @@ function filtrarLojas() {
     const estadoSelecionado = stateFilter?.value || '';
     const statusSelecionado = statusFilter?.value || '';
     const totemSelecionado = totemFilter?.value || '';
+    
+    // Salvar o estado atual dos filtros
+    salvarFiltros();
     
     // Mostrar indicador de carregamento durante a filtragem
     if (lojasTableBody) {
@@ -734,50 +790,52 @@ function filtrarLojas() {
     // Usar setTimeout para não bloquear a UI durante o processamento
     setTimeout(() => {
         try {
-    // Filtrar lojas com base nos critérios
-    lojasFiltradas = todasLojas.filter(loja => {
-        const codigo = loja.codigo.toLowerCase();
-        const { regiao, estado } = getLojaRegionAndState(loja.codigo);
-        
-        // Filtro de texto
-        const passaFiltroTexto = termoPesquisa === '' || codigo.includes(termoPesquisa);
-        
-        // Filtro de região
-        const passaFiltroRegiao = regiaoSelecionada === '' || regiao === regiaoSelecionada;
-        
-        // Filtro de estado
-        const passaFiltroEstado = estadoSelecionado === '' || estado === estadoSelecionado;
-        
-        // Filtro de status da loja
-        let passaFiltroStatus = true;
-        if (statusSelecionado !== '') {
-            const statusInfo = determinarStatus(loja.dados);
-            passaFiltroStatus = (statusSelecionado === 'online' && statusInfo.status === 'Online') || 
-                                (statusSelecionado === 'offline' && statusInfo.status === 'Offline');
-        }
-        
-        // Filtro de status do totem
-        let passaFiltroTotem = true;
-        if (totemSelecionado !== '') {
-            if (loja.dados.status_motherboard) {
-                passaFiltroTotem = (totemSelecionado === 'on' && loja.dados.status_motherboard === 'ON') || 
-                                  (totemSelecionado === 'off' && loja.dados.status_motherboard === 'OFF');
-            } else {
-                // Se não tiver status do totem, não passa no filtro de totem ON ou OFF
-                passaFiltroTotem = false;
-            }
-        }
-        
-        // Retorna true apenas se passar por todos os filtros
-        return passaFiltroTexto && passaFiltroRegiao && passaFiltroEstado && passaFiltroStatus && passaFiltroTotem;
-    });
-    
+            // Filtrar lojas com base nos critérios
+            lojasFiltradas = todasLojas.filter(loja => {
+                // Ignorar nós especiais como status_history
+                if (loja.codigo === 'status_history') return false;
+                
+                const codigo = loja.codigo.toLowerCase();
+                const { regiao, estado } = getLojaRegionAndState(loja.codigo);
+                
+                // Filtro de texto
+                const passaFiltroTexto = termoPesquisa === '' || codigo.includes(termoPesquisa);
+                
+                // Filtro de região
+                const passaFiltroRegiao = regiaoSelecionada === '' || regiao === regiaoSelecionada;
+                
+                // Filtro de estado
+                const passaFiltroEstado = estadoSelecionado === '' || estado === estadoSelecionado;
+                
+                // Filtro de status da loja
+                let passaFiltroStatus = true;
+                if (statusSelecionado !== '') {
+                    const statusInfo = determinarStatus(loja.dados);
+                    passaFiltroStatus = (statusSelecionado === 'online' && statusInfo.status === 'Online') || 
+                                        (statusSelecionado === 'offline' && statusInfo.status === 'Offline');
+                }
+                
+                // Filtro de status do totem
+                let passaFiltroTotem = true;
+                if (totemSelecionado !== '') {
+                    if (loja.dados.status_motherboard) {
+                        passaFiltroTotem = (totemSelecionado === 'on' && loja.dados.status_motherboard === 'ON') || 
+                                          (totemSelecionado === 'off' && loja.dados.status_motherboard === 'OFF');
+                    } else {
+                        // Se não tiver status do totem, não passa no filtro de totem ON ou OFF
+                        passaFiltroTotem = false;
+                    }
+                }
+                
+                // Retorna true apenas se passar por todos os filtros
+                return passaFiltroTexto && passaFiltroRegiao && passaFiltroEstado && passaFiltroStatus && passaFiltroTotem;
+            });
+            
             // Limitar o número de resultados para não sobrecarregar o navegador
             const resultadosMaximos = 100;
             const resultadosLimitados = lojasFiltradas.length > resultadosMaximos;
             
             if (resultadosLimitados) {
-                console.log(`Filtragem limitada a ${resultadosMaximos} resultados para melhor desempenho`);
                 lojasFiltradas = lojasFiltradas.slice(0, resultadosMaximos);
             }
             
@@ -793,7 +851,6 @@ function filtrarLojas() {
             
             // Verificar se o elemento da tabela existe
             if (!lojasTableBody) {
-                console.warn("Elemento lojasTableBody não encontrado no DOM.");
                 return;
             }
             
@@ -808,30 +865,29 @@ function filtrarLojas() {
                 <td colspan="7" class="text-center py-4">
                     <div class="alert alert-info mb-0">
                         <i class="fas fa-info-circle me-2"></i>
-                        Nenhuma loja encontrada com os filtros selecionados.
+                                Nenhuma loja encontrada com os filtros aplicados.
                     </div>
                 </td>
             </tr>
         `;
-        return;
-    }
-    
-            // Criar um fragmento de documento para melhorar o desempenho
+            } else {
+                // Criar um fragmento para melhor performance
             const fragmento = document.createDocumentFragment();
             
-            // Adicionar as lojas filtradas à tabela
+                // Adicionar cada loja filtrada à visualização em tabela
     lojasFiltradas.forEach(loja => {
         // Adicionar à visualização em tabela
-                fragmento.appendChild(criarLinhaLoja(loja.codigo, loja.dados));
+                    const row = criarLinhaTabelaLoja(loja.codigo, loja.dados);
+                    if (row) {
+                        fragmento.appendChild(row);
+                    }
             });
             
-            // Adicionar o fragmento completo à tabela de uma só vez (melhora o desempenho)
+                // Adicionar todas as linhas de uma vez para melhor performance
             lojasTableBody.appendChild(fragmento);
             
-            // Verificar se o jQuery e DataTables estão disponíveis
-            if (typeof $ === 'function' && typeof $.fn.DataTable === 'function') {
+                // Inicializar DataTable após populá-la
                 try {
-                    // Inicializar o DataTable com as novas linhas e configurações para otimizar o desempenho
                     lojasTable = $('#lojas-table').DataTable({
                         pageLength: 25, // Aumentar para 25 itens por página para menos reloads
                         lengthMenu: [10, 25, 50, 100],
@@ -870,7 +926,7 @@ function filtrarLojas() {
                              '<"row"<"col-sm-12 col-md-5"i><"col-sm-12 col-md-7"p>>'
                     });
                 } catch (error) {
-                    console.error("Erro ao inicializar DataTable:", error);
+                    console.error('Erro ao inicializar DataTable:', error);
                 }
             }
     
@@ -880,8 +936,6 @@ function filtrarLojas() {
             } catch (error) {
                 console.error("Erro ao atualizar contador de lojas afetadas:", error);
             }
-            
-            console.timeEnd('filtro-lojas');
         } catch (error) {
             console.error("Erro ao filtrar lojas:", error);
             if (lojasTableBody) {
@@ -1222,8 +1276,11 @@ async function executarResetEmLote() {
 
 // Função para atualizar as estatísticas de lojas e totems
 function atualizarEstatisticas() {
+    // Filtrar nós especiais como 'status_history' antes de contar
+    const lojasValidas = todasLojas.filter(loja => loja.codigo !== 'status_history');
+    
     // Inicializa contadores
-    let totalLojas = todasLojas.length;
+    let totalLojas = lojasValidas.length;
     let lojasOnline = 0;
     let lojasOffline = 0;
     let totemsOn = 0;
@@ -1235,10 +1292,9 @@ function atualizarEstatisticas() {
     let totemsDesligados = [];
     
     // Conta lojas online/offline e totems on/off
-    todasLojas.forEach(loja => {
-        // Verifica status da loja
-        const statusInfo = determinarStatus(loja.dados);
-        if (statusInfo.status === "Online") {
+    lojasValidas.forEach(loja => {
+        // Verifica status da loja diretamente do Firebase
+        if (loja.dados && loja.dados.pc_status && loja.dados.pc_status.status === "Online") {
             lojasOnline++;
         } else {
             lojasOffline++;
@@ -1250,7 +1306,7 @@ function atualizarEstatisticas() {
             });
         }
         
-        // Verifica status do totem
+        // Verifica status do totem diretamente, sem inferências baseadas em tempo
         if (loja.dados.status_motherboard) {
             totalTotemsMonitorados++;
             if (loja.dados.status_motherboard === 'ON') {
@@ -1258,7 +1314,7 @@ function atualizarEstatisticas() {
             } else {
                 totemsOff++;
                 // Apenas adiciona à lista de totems desligados se a loja estiver online
-                if (statusInfo.status === "Online") {
+                if (loja.dados.pc_status && loja.dados.pc_status.status === "Online") {
                     totemsDesligados.push({
                         codigo: loja.codigo,
                         ultimaAtualizacao: loja.dados.pc_status ? loja.dados.pc_status.timestamp : null,
@@ -1598,13 +1654,50 @@ function atualizarEstatisticas() {
     
     // Atualizar marcadores no mapa
     atualizarMarcadoresMapa();
-    
-    console.log(`Estatísticas atualizadas: ${lojasOnline}/${totalLojas} lojas online (${percentLojasOnline}%), ${totemsOn}/${totalTotemsMonitorados} totems ON (${percentTotemsOn}%)`);
 }
 
 // Função para carregar as lojas do Firebase
 function carregarLojas() {
     // Mostrar indicador de carregamento mais informativo
+    if (lojasTableBody) {
+        lojasTableBody.innerHTML = `
+            <tr>
+                <td colspan="7" class="text-center py-4">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Carregando...</span>
+                    </div>
+                    <p class="mt-2 mb-0">Verificando cache de lojas...</p>
+                </td>
+            </tr>
+        `;
+    }
+
+    // Tentar carregar do cache primeiro
+    const lojasCache = carregarLojasDoCache();
+    
+    if (lojasCache) {
+        // Se temos dados em cache, usá-los imediatamente
+        processarLojasCarregadas(lojasCache, true);
+        
+        // Atualizar mensagem de carregamento
+        if (lojasTableBody) {
+            lojasTableBody.innerHTML = `
+                <tr>
+                    <td colspan="7" class="text-center py-4">
+                        <div class="spinner-border text-primary" role="status">
+                            <span class="visually-hidden">Carregando...</span>
+                        </div>
+                        <p class="mt-2 mb-0">Verificando atualizações do Firebase...</p>
+                    </td>
+                </tr>
+            `;
+        }
+        
+        // Ainda assim, buscar atualizações do Firebase em segundo plano
+        carregarLojasDoFirebase(true);
+    } else {
+        // Se não temos cache, carregar diretamente do Firebase
+        // Atualizar mensagem de carregamento
     if (lojasTableBody) {
         lojasTableBody.innerHTML = `
             <tr>
@@ -1618,21 +1711,22 @@ function carregarLojas() {
         `;
     }
 
-    // Limitar a quantidade de dados obtidos com shallow
-    database.ref('/').limitToFirst(100).on('value', snapshot => {
-        console.time('processamento-lojas');
-        
-            // Remove o elemento de loading
-        if (loadingRow) {
+        carregarLojasDoFirebase(false);
+    }
+}
+
+// Função para carregar lojas do Firebase
+function carregarLojasDoFirebase(atualizacaoEmSegundoPlano = false) {
+    // Limitar a quantidade de dados obtidos com shallow e evitar recargas desnecessárias
+    database.ref('/').limitToFirst(100).once('value', snapshot => {
+        // Remove o elemento de loading se não estiver em segundo plano
+        if (loadingRow && !atualizacaoEmSegundoPlano) {
             loadingRow.remove();
             }
             
-            // Limpar o array de lojas
-            todasLojas = [];
-            
             // Verifica se existem lojas
             if (!snapshot.exists()) {
-            if (lojasTableBody) {
+            if (lojasTableBody && !atualizacaoEmSegundoPlano) {
                 lojasTableBody.innerHTML = `
                     <tr>
                         <td colspan="7" class="text-center py-4">
@@ -1649,63 +1743,70 @@ function carregarLojas() {
             
             // Itera sobre as lojas
             const lojas = snapshot.val();
+            let lojasProcessadas = [];
             let encontrouLojas = false;
-        let promisesLoja = [];
+            let lojasFiltradas = 0;
             
-        // Carregar dados básicos primeiro para exibição rápida
+            // Carregar dados básicos primeiro para exibição rápida
             for (const codigo in lojas) {
-            // Verificação básica se é uma loja válida
+                // Ignorar nós especiais como "status_history" que não são lojas
+                if (codigo === 'status_history') {
+                    lojasFiltradas++;
+                    console.log(`Ignorando nó especial: ${codigo}`);
+                    continue;
+                }
+                
+                // Verificação básica se é uma loja válida
                 const loja = lojas[codigo];
-            if (typeof loja === 'object') {
+                if (typeof loja === 'object') {
                     encontrouLojas = true;
                     
-                    // Armazenar a loja para filtrar posteriormente
-                    todasLojas.push({
+                    // Armazenar a loja para processamento
+                    lojasProcessadas.push({
                         codigo: codigo,
                         dados: loja
                     });
                 }
             }
             
-        console.log(`Carregadas ${todasLojas.length} lojas do Firebase`);
-        
-        // Primeiro renderizar com os dados básicos para mostrar algo rapidamente
-        if (todasLojas.length > 0) {
-            // Atualizar estatísticas
-            atualizarEstatisticas();
+            console.log(`Lojas carregadas: ${lojasProcessadas.length}, Nós ignorados: ${lojasFiltradas}`);
             
-            // Aplicar filtros iniciais
-            filtrarLojas();
+            // Processar as lojas carregadas
+            if (lojasProcessadas.length > 0) {
+                processarLojasCarregadas(lojasProcessadas, atualizacaoEmSegundoPlano);
+                
+                // Salvar no cache apenas se não for uma atualização em segundo plano
+                if (!atualizacaoEmSegundoPlano) {
+                    salvarLojasNoCache(lojasProcessadas);
+                    // Atualizar badge de fonte de dados
+                    atualizarBadgeFonteDados('firebase');
+                } else if (cacheUsado) {
+                    // Se estamos atualizando dados que vieram do cache, atualizar o cache
+                    salvarLojasNoCache(todasLojas);
+                    // Atualizar badge de fonte de dados indicando atualização em segundo plano
+                    atualizarBadgeFonteDados('atualizado');
+                }
+            }
             
-            // Configurar listeners de real-time apenas para as primeiras 10 lojas (as mais importantes)
-            // Isso evita sobrecarga de listeners que podem causar lentidão
-            const lojasParaListener = todasLojas.slice(0, 10);
-            lojasParaListener.forEach(loja => {
-                configurarStatusListener(loja.codigo);
-            });
-        }
-            
-            // Se não encontrou lojas válidas
-        if (!encontrouLojas && lojasTableBody) {
-            lojasTableBody.innerHTML = `
-                <tr>
-                    <td colspan="7" class="text-center py-4">
-                        <div class="alert alert-warning">
-                            <i class="fas fa-exclamation-triangle me-2"></i>
-                            Foram encontrados dados no Firebase, mas nenhuma loja válida foi identificada.
-                        </div>
-                    </td>
-                </tr>
+            // Se não encontrou lojas válidas e não é atualização em segundo plano
+            if (!encontrouLojas && !atualizacaoEmSegundoPlano && lojasTableBody) {
+                lojasTableBody.innerHTML = `
+                    <tr>
+                        <td colspan="7" class="text-center py-4">
+                            <div class="alert alert-warning">
+                                <i class="fas fa-exclamation-triangle me-2"></i>
+                                Foram encontrados dados no Firebase, mas nenhuma loja válida foi identificada.
+                            </div>
+                        </td>
+                    </tr>
                 `;
             }
-        
-        console.timeEnd('processamento-lojas');
     }, error => {
             console.error("Erro ao carregar lojas:", error);
-        if (loadingRow) {
+        if (loadingRow && !atualizacaoEmSegundoPlano) {
             loadingRow.remove();
             }
-        if (lojasTableBody) {
+        if (lojasTableBody && !atualizacaoEmSegundoPlano) {
             lojasTableBody.innerHTML = `
                 <tr>
                     <td colspan="7" class="text-center py-4">
@@ -1717,32 +1818,287 @@ function carregarLojas() {
                 </tr>
             `;
         }
+        
+        // Atualizar badge em caso de erro
+        if (!atualizacaoEmSegundoPlano) {
+            atualizarBadgeFonteDados('erro');
+        }
+    });
+}
+
+// Função para processar lojas carregadas (do cache ou Firebase)
+function processarLojasCarregadas(lojasProcessadas, atualizacaoEmSegundoPlano = false) {
+    // Filtrar nós especiais como 'status_history'
+    lojasProcessadas = lojasProcessadas.filter(loja => loja.codigo !== 'status_history');
+    
+    // Se for uma atualização em segundo plano, precisamos atualizar todasLojas
+    if (atualizacaoEmSegundoPlano) {
+        // Criar um mapa dos códigos existentes para facilitar a atualização
+        const lojasExistentesMap = {};
+        todasLojas.forEach(loja => {
+            // Ignorar nós especiais ao criar o mapa
+            if (loja.codigo !== 'status_history') {
+                lojasExistentesMap[loja.codigo] = loja;
+            }
         });
+        
+        // Atualizar lojas existentes ou adicionar novas
+        lojasProcessadas.forEach(lojaProcessada => {
+            const lojaExistente = lojasExistentesMap[lojaProcessada.codigo];
+            
+            if (lojaExistente) {
+                // Atualizar dados da loja existente
+                lojaExistente.dados = lojaProcessada.dados;
+                // Atualizar visualização se necessário
+                atualizarStatusLoja(lojaProcessada.codigo, lojaProcessada.dados);
+                atualizarStatusLinhaLoja(lojaProcessada.codigo, lojaProcessada.dados);
+            } else {
+                // Adicionar nova loja
+                todasLojas.push(lojaProcessada);
+            }
+        });
+        
+        // Remover nós especiais do array todasLojas
+        todasLojas = todasLojas.filter(loja => loja.codigo !== 'status_history');
+    } else {
+        // Se não for atualização em segundo plano, substituir todasLojas
+        todasLojas = lojasProcessadas;
+    }
+    
+    // Se não for atualização em segundo plano ou todasLojas estava vazio antes
+    if (!atualizacaoEmSegundoPlano || cacheUsado) {
+        // Atualizar estatísticas
+        atualizarEstatisticasDebounced();
+        
+        // Aplicar filtros iniciais
+        filtrarLojasDebounced();
+        
+        // Configurar listeners apenas para as primeiras 10 lojas
+        const lojasParaListener = todasLojas.slice(0, 10);
+        lojasParaListener.forEach(loja => {
+            configurarStatusListener(loja.codigo);
+        });
+        
+        // Se for atualização de cache, remover o loading
+        if (atualizacaoEmSegundoPlano && loadingRow) {
+            loadingRow.remove();
+        }
+    }
+    
+    // Se veio do cache, marcar flag
+    if (!atualizacaoEmSegundoPlano) {
+        cacheUsado = false;
+    }
+}
+
+// Função para salvar os dados de lojas no cache
+function salvarLojasNoCache(lojas) {
+    try {
+        // Filtrar nós especiais antes de salvar no cache
+        const lojasFiltradas = lojas.filter(loja => loja.codigo !== 'status_history');
+        
+        // Salvar os dados das lojas
+        localStorage.setItem(CACHE_KEY_LOJAS, JSON.stringify(lojasFiltradas));
+        
+        // Salvar o timestamp atual
+        localStorage.setItem(CACHE_KEY_TIMESTAMP, Date.now().toString());
+        
+        console.log(`Dados de lojas salvos em cache com sucesso (${lojasFiltradas.length} lojas)`);
+    } catch (error) {
+        console.error('Erro ao salvar dados de lojas no cache:', error);
+        // Se falhar, tenta limpar o localStorage para liberar espaço
+        try {
+            localStorage.clear();
+            console.log('localStorage foi limpo devido a erro ao salvar');
+        } catch (e) {
+            console.error('Falha ao limpar localStorage:', e);
+        }
+    }
+}
+
+// Função para carregar os dados de lojas do cache
+function carregarLojasDoCache() {
+    try {
+        // Verificar se existe cache
+        const cachedTimestamp = localStorage.getItem(CACHE_KEY_TIMESTAMP);
+        if (!cachedTimestamp) return null;
+        
+        // Verificar se o cache está expirado
+        const timestamp = parseInt(cachedTimestamp);
+        const agora = Date.now();
+        if (agora - timestamp > CACHE_EXPIRY_TIME) {
+            console.log('Cache de lojas expirado, será recarregado do Firebase');
+            return null;
+        }
+        
+        // Carregar os dados das lojas
+        const cachedLojas = localStorage.getItem(CACHE_KEY_LOJAS);
+        if (!cachedLojas) return null;
+        
+        // Converter os dados JSON para objeto
+        let lojas = JSON.parse(cachedLojas);
+        
+        // Filtrar nós especiais como 'status_history'
+        lojas = lojas.filter(loja => loja.codigo !== 'status_history');
+        
+        console.log(`Cache de lojas carregado com sucesso (${lojas.length} lojas após filtrar nós especiais)`);
+        
+        // Calcular e exibir o tempo desde a última atualização
+        const tempoDesdeAtualizacao = formatarTempoRelativo(agora - timestamp);
+        mostrarIndicadorDadosCache(tempoDesdeAtualizacao);
+        
+        // Atualizar badge de fonte de dados
+        atualizarBadgeFonteDados('cache', tempoDesdeAtualizacao);
+        
+        // Marcar que estamos usando cache
+        cacheUsado = true;
+        
+        return lojas;
+    } catch (error) {
+        console.error('Erro ao carregar cache de lojas:', error);
+        return null;
+    }
+}
+
+// Função para mostrar indicador de dados em cache
+function mostrarIndicadorDadosCache(tempoDesdeAtualizacao) {
+    // Criar div de notificação, se não existir
+    let cacheNotification = document.getElementById('cache-notification');
+    if (!cacheNotification) {
+        cacheNotification = document.createElement('div');
+        cacheNotification.id = 'cache-notification';
+        cacheNotification.className = 'cache-notification';
+        cacheNotification.style.cssText = `
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background-color: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-left: 4px solid #0d6efd;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            padding: 10px 15px;
+            border-radius: 6px;
+            z-index: 1050;
+            font-size: 0.9rem;
+            max-width: 300px;
+            transform: translateY(100px);
+            opacity: 0;
+            transition: transform 0.3s ease, opacity 0.3s ease;
+        `;
+        
+        // Adicionar à página
+        document.body.appendChild(cacheNotification);
+    }
+    
+    // Atualizar conteúdo
+    cacheNotification.innerHTML = `
+        <div class="d-flex align-items-center">
+            <div class="me-2">
+                <i class="fas fa-database text-primary"></i>
+            </div>
+            <div>
+                <div class="fw-bold">Dados carregados do cache</div>
+                <div class="small text-muted">Última atualização: ${tempoDesdeAtualizacao}</div>
+                <div class="small mt-1">
+                    <a href="#" id="refresh-data" class="text-primary">
+                        <i class="fas fa-sync-alt me-1"></i>Atualizar agora
+                    </a>
+                </div>
+            </div>
+            <button type="button" class="btn-close ms-3" aria-label="Close"></button>
+        </div>
+    `;
+    
+    // Mostrar notificação com animação
+    setTimeout(() => {
+        cacheNotification.style.transform = 'translateY(0)';
+        cacheNotification.style.opacity = '1';
+    }, 100);
+    
+    // Adicionar evento de clique para fechar
+    const closeBtn = cacheNotification.querySelector('.btn-close');
+    if (closeBtn) {
+        closeBtn.addEventListener('click', () => {
+            cacheNotification.style.transform = 'translateY(100px)';
+            cacheNotification.style.opacity = '0';
+            setTimeout(() => {
+                cacheNotification.remove();
+            }, 300);
+        });
+    }
+    
+    // Adicionar evento de clique para atualizar dados
+    const refreshBtn = cacheNotification.querySelector('#refresh-data');
+    if (refreshBtn) {
+        refreshBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            
+            // Mostrar loading
+            cacheNotification.innerHTML = `
+                <div class="d-flex align-items-center">
+                    <div class="spinner-border spinner-border-sm text-primary me-2" role="status">
+                        <span class="visually-hidden">Carregando...</span>
+                    </div>
+                    <div>Atualizando dados do Firebase...</div>
+                </div>
+            `;
+            
+            // Limpar cache e recarregar
+            localStorage.removeItem(CACHE_KEY_LOJAS);
+            localStorage.removeItem(CACHE_KEY_TIMESTAMP);
+            
+            // Recarregar a página para atualizar os dados
+            window.location.reload();
+        });
+    }
+    
+    // Auto-esconder após 10 segundos
+    setTimeout(() => {
+        if (cacheNotification && document.body.contains(cacheNotification)) {
+            cacheNotification.style.transform = 'translateY(100px)';
+            cacheNotification.style.opacity = '0';
+            setTimeout(() => {
+                if (cacheNotification && document.body.contains(cacheNotification)) {
+                    cacheNotification.remove();
+                }
+            }, 300);
+        }
+    }, 10000);
+}
+
+// Função para formatar tempo relativo
+function formatarTempoRelativo(ms) {
+    const segundos = Math.floor(ms / 1000);
+    
+    if (segundos < 60) {
+        return 'agora mesmo';
+    } else if (segundos < 60 * 60) {
+        const minutos = Math.floor(segundos / 60);
+        return `há ${minutos} ${minutos === 1 ? 'minuto' : 'minutos'}`;
+    } else if (segundos < 60 * 60 * 24) {
+        const horas = Math.floor(segundos / (60 * 60));
+        return `há ${horas} ${horas === 1 ? 'hora' : 'horas'}`;
+    } else {
+        const dias = Math.floor(segundos / (60 * 60 * 24));
+        return `há ${dias} ${dias === 1 ? 'dia' : 'dias'}`;
+    }
 }
 
 // Função para configurar listeners para atualizações de status em tempo real
 function configurarStatusListener(codigo) {
-    // Listener para o timestamp do pc_status
-    const statusRef = database.ref(`/${codigo}/pc_status/timestamp`);
+    // Listener para status da loja no Firebase, sem verificações de tempo
+    const statusRef = database.ref(`/${codigo}/pc_status/status`);
     statusRef.on('value', (snapshot) => {
-        // Quando o timestamp mudar, buscar todas as informações da loja
+        // Quando o status mudar, buscar todas as informações da loja
         database.ref(`/${codigo}`).once('value')
             .then(lojaSnapshot => {
                 if (lojaSnapshot.exists()) {
                     const loja = lojaSnapshot.val();
                     // Atualiza o card da loja com as novas informações
                     atualizarStatusLoja(codigo, loja);
-                    
-                    // Atualiza a linha da tabela com as novas informações
-                    atualizarStatusLinhaLoja(codigo, loja);
-                    
-                    // Atualiza os dados armazenados
-                    const lojaIndex = todasLojas.findIndex(l => l.codigo === codigo);
-                    if (lojaIndex !== -1) {
-                        todasLojas[lojaIndex].dados = loja;
-                        
-                        // Atualiza as estatísticas quando um status mudar
-                        atualizarEstatisticas();
+                    // Atualiza o status no mapa se estiver disponível
+                    if (typeof atualizarMarcadoresMapa === 'function') {
+                        atualizarMarcadoresMapa();
                     }
                 }
             })
@@ -1756,7 +2112,6 @@ function configurarStatusListener(codigo) {
     motherboardRef.on('value', (snapshot) => {
         if (snapshot.exists()) {
             const status = snapshot.val();
-            console.log(`Status do totem ${codigo} atualizado: ${status}`);
             
             // Busca o elemento do card no DOM
             const cardElement = document.querySelector(`.card[data-loja="${codigo}"]`);
@@ -1764,57 +2119,16 @@ function configurarStatusListener(codigo) {
                 const motherboardStatusText = cardElement.querySelector('.motherboard-status');
                 const motherboardIndicator = cardElement.querySelector('.motherboard-indicator');
                 
+                // Atualiza o texto e o indicador visual
                 if (motherboardStatusText && motherboardIndicator) {
                     const isMotherboardOn = status === 'ON';
                     motherboardStatusText.textContent = `Totem: ${isMotherboardOn ? 'ON' : 'OFF'}`;
                     motherboardStatusText.className = `${isMotherboardOn ? 'text-success' : 'text-danger'} fw-medium motherboard-status small-text`;
                     
-                    // Atualiza o indicador de status do totem
+                    // Atualiza o indicador de status
                     motherboardIndicator.classList.remove('status-online', 'status-offline');
-                    if (isMotherboardOn) {
-                        motherboardIndicator.classList.add('status-online');
-                    } else {
-                        motherboardIndicator.classList.add('status-offline');
-                    }
+                    motherboardIndicator.classList.add(isMotherboardOn ? 'status-online' : 'status-offline');
                 }
-            }
-            
-            // Busca a linha da tabela no DOM
-            const rowElement = document.querySelector(`#lojas-table-body tr[data-loja="${codigo}"]`);
-            if (rowElement) {
-                const motherboardStatusText = rowElement.querySelector('.motherboard-status');
-                const motherboardIndicator = rowElement.querySelector('.motherboard-indicator');
-                
-                if (motherboardStatusText && motherboardIndicator) {
-                    const isMotherboardOn = status === 'ON';
-                    motherboardStatusText.textContent = isMotherboardOn ? 'ON' : 'OFF';
-                    motherboardStatusText.className = `${isMotherboardOn ? 'text-success' : 'text-danger'} fw-medium motherboard-status`;
-                    
-                    // Atualiza o indicador de status do totem
-                    motherboardIndicator.classList.remove('status-online', 'status-offline');
-                    if (isMotherboardOn) {
-                        motherboardIndicator.classList.add('status-online');
-                        
-                        // Remove classe de destaque de totem offline
-                        rowElement.classList.remove('totem-offline-row');
-                    } else {
-                        motherboardIndicator.classList.add('status-offline');
-                        
-                        // Adiciona classe de destaque se não estiver offline
-                        if (!rowElement.classList.contains('table-danger')) {
-                            rowElement.classList.add('totem-offline-row');
-                        }
-                    }
-                }
-            }
-            
-            // Atualiza os dados armazenados
-            const lojaIndex = todasLojas.findIndex(l => l.codigo === codigo);
-            if (lojaIndex !== -1) {
-                todasLojas[lojaIndex].dados.status_motherboard = status;
-                
-                // Atualiza as estatísticas quando um status mudar
-                atualizarEstatisticas();
             }
         }
     });
@@ -1831,8 +2145,8 @@ function limparFiltros() {
     // Resetar o select de estados
     stateFilter.innerHTML = '<option value="">Todos os Estados</option>';
     
-    // Aplicar filtros (agora todos vazios)
-    filtrarLojas();
+    // Aplicar filtros (agora todos vazios) com debounce
+    filtrarLojasDebounced();
 }
 
 // Função para inicializar o mapa
@@ -2003,7 +2317,6 @@ function atualizarMarcadoresMapa() {
         
         // PRIORIDADE: Verificar se a loja tem coordenadas e criar marcador individual
         if (loja.dados.coordenadas && loja.dados.coordenadas.lat && loja.dados.coordenadas.lon) {
-            console.log(`Usando coordenadas da loja ${loja.codigo}: Lat ${loja.dados.coordenadas.lat}, Lon ${loja.dados.coordenadas.lon}`);
             const marcadorLoja = criarMarcadorLoja(loja.codigo, loja.dados, loja.dados.coordenadas);
             marcadoresLojas.push(marcadorLoja);
         }
@@ -2016,12 +2329,8 @@ function atualizarMarcadoresMapa() {
         mapMarkers.push(marker);
     });
     
-    console.log(`Adicionados ${marcadoresLojas.length} marcadores com coordenadas reais ao mapa`);
-    
     // PASSO 2: Apenas se não houver NENHUM marcador individual, usamos os marcadores de estado como fallback
     if (marcadoresLojas.length === 0) {
-        console.log("Usando coordenadas de estados como fallback - nenhuma loja tem coordenadas salvas");
-        
         // Adicionar marcadores para cada estado com lojas
         Object.keys(lojasPorEstado).forEach(estado => {
             // Verificar se temos coordenadas para este estado
@@ -2115,10 +2424,22 @@ function atualizarMarcadoresMapa() {
     }
 }
 
+// Função de debounce para limitar a frequência de chamadas de funções
+function debounce(func, wait) {
+    let timeout;
+    return function(...args) {
+        const context = this;
+        clearTimeout(timeout);
+        timeout = setTimeout(() => func.apply(context, args), wait);
+    };
+}
+
+// Versões com debounce de funções que eram chamadas muito frequentemente
+const atualizarEstatisticasDebounced = debounce(atualizarEstatisticas, 2000);
+const filtrarLojasDebounced = debounce(filtrarLojas, 1000);
+
 // Inicializar a aplicação quando o DOM estiver carregado
 document.addEventListener('DOMContentLoaded', function() {
-    console.log('DOM carregado, inicializando aplicação...');
-    
     try {
         // Verificar se elementos principais existem antes de continuar
         if (!lojasTableBody) {
@@ -2134,8 +2455,8 @@ document.addEventListener('DOMContentLoaded', function() {
                         preencherSelectEstados(stateFilter, this.value);
                     }
             
-            // Aplicar filtros
-            filtrarLojas();
+                    // Aplicar filtros com debounce
+                    filtrarLojasDebounced();
                 } catch (error) {
                     console.error("Erro ao aplicar filtro de região:", error);
                 }
@@ -2145,7 +2466,7 @@ document.addEventListener('DOMContentLoaded', function() {
     if (stateFilter) {
             stateFilter.addEventListener('change', function() {
                 try {
-                    filtrarLojas();
+                    filtrarLojasDebounced();
                 } catch (error) {
                     console.error("Erro ao aplicar filtro de estado:", error);
                 }
@@ -2155,7 +2476,7 @@ document.addEventListener('DOMContentLoaded', function() {
     if (statusFilter) {
             statusFilter.addEventListener('change', function() {
                 try {
-                    filtrarLojas();
+                    filtrarLojasDebounced();
                 } catch (error) {
                     console.error("Erro ao aplicar filtro de status:", error);
                 }
@@ -2165,7 +2486,7 @@ document.addEventListener('DOMContentLoaded', function() {
     if (totemFilter) {
             totemFilter.addEventListener('change', function() {
                 try {
-                    filtrarLojas();
+                    filtrarLojasDebounced();
                 } catch (error) {
                     console.error("Erro ao aplicar filtro de totem:", error);
                 }
@@ -2179,7 +2500,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     // Previne que o evento seja capturado pelo DataTables
                     e.stopPropagation();
                     if (e.key === 'Enter') {
-                        filtrarLojas();
+                        filtrarLojasDebounced();
                     }
                 } catch (error) {
                     console.error("Erro na busca por texto:", error);
@@ -2191,7 +2512,7 @@ document.addEventListener('DOMContentLoaded', function() {
             if (searchButton) {
                 searchButton.addEventListener('click', function() {
                     try {
-                        filtrarLojas();
+                        filtrarLojasDebounced();
                     } catch (error) {
                         console.error("Erro ao buscar com botão:", error);
                     }
@@ -2299,7 +2620,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         preencherSelectEstados(lojasOfflineEstado, this.value);
                     }
                     // Atualizar listas com filtros
-                    atualizarEstatisticas();
+                    atualizarEstatisticasDebounced();
                 } catch (error) {
                     console.error("Erro ao filtrar lojas offline por região:", error);
                 }
@@ -2309,7 +2630,7 @@ document.addEventListener('DOMContentLoaded', function() {
         if (lojasOfflineEstado) {
             lojasOfflineEstado.addEventListener('change', function() {
                 try {
-                    atualizarEstatisticas();
+                    atualizarEstatisticasDebounced();
                 } catch (error) {
                     console.error("Erro ao filtrar lojas offline por estado:", error);
                 }
@@ -2324,7 +2645,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         preencherSelectEstados(totemsOfflineEstado, this.value);
                             }
                     // Atualizar listas com filtros
-                    atualizarEstatisticas();
+                    atualizarEstatisticasDebounced();
                 } catch (error) {
                     console.error("Erro ao filtrar totems offline por região:", error);
                 }
@@ -2334,7 +2655,7 @@ document.addEventListener('DOMContentLoaded', function() {
         if (totemsOfflineEstado) {
             totemsOfflineEstado.addEventListener('change', function() {
                 try {
-                            atualizarEstatisticas();
+                            atualizarEstatisticasDebounced();
                 } catch (error) {
                     console.error("Erro ao filtrar totems offline por estado:", error);
                 }
@@ -2358,13 +2679,257 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         }
         
-        // Carregar lojas do Firebase
+        // Carregar filtros salvos, se existirem
+        const filtrosCarregados = carregarFiltrosSalvos();
+        
+        // Carregar lojas (agora vai tentar do cache primeiro)
         carregarLojas();
+        
+        // Se os filtros foram carregados, aplicá-los após um pequeno delay
+        // para garantir que as lojas já foram carregadas
+        if (filtrosCarregados) {
+            setTimeout(() => {
+                filtrarLojasDebounced();
+            }, 1000);
+        }
         
         // Inicializar o mapa
         inicializarMapa();
+        
+        // Adicionar botão para limpar cache
+        const clearCacheBtn = document.getElementById('clear-cache');
+        if (clearCacheBtn) {
+            clearCacheBtn.addEventListener('click', function() {
+                try {
+                    localStorage.removeItem(CACHE_KEY_LOJAS);
+                    localStorage.removeItem(CACHE_KEY_TIMESTAMP);
+                    Swal.fire({
+                        icon: 'success',
+                        title: 'Cache limpo',
+                        text: 'Os dados serão recarregados do Firebase na próxima visita.',
+                        confirmButtonColor: '#0d6efd'
+                    }).then(() => {
+                        // Recarregar a página para atualizar os dados
+                        window.location.reload();
+                    });
+                } catch (error) {
+                    console.error("Erro ao limpar cache:", error);
+                    Swal.fire({
+                        icon: 'error',
+                        title: 'Erro',
+                        text: 'Não foi possível limpar o cache: ' + error.message,
+                        confirmButtonColor: '#0d6efd'
+                    });
+                }
+            });
+        }
     } catch (error) {
         console.error("Erro na inicialização da aplicação:", error);
     }
 });
+
+// Função para formatar o nome do estado
+function formatarNomeEstado(sigla) {
+    return estadosNomes[sigla] || sigla;
+}
+
+// Função para salvar os filtros atuais no localStorage
+function salvarFiltros() {
+    try {
+        // Obter os valores atuais dos filtros
+        const filtros = {
+            busca: searchInput ? searchInput.value : '',
+            regiao: regionFilter ? regionFilter.value : '',
+            estado: stateFilter ? stateFilter.value : '',
+            status: statusFilter ? statusFilter.value : '',
+            totem: totemFilter ? totemFilter.value : ''
+        };
+        
+        // Salvar no localStorage
+        localStorage.setItem(FILTERS_KEY, JSON.stringify(filtros));
+        console.log('Filtros salvos com sucesso');
+    } catch (error) {
+        console.error('Erro ao salvar filtros:', error);
+    }
+}
+
+// Função para carregar os filtros salvos do localStorage
+function carregarFiltrosSalvos() {
+    try {
+        // Carregar do localStorage
+        const filtrosSalvos = localStorage.getItem(FILTERS_KEY);
+        if (!filtrosSalvos) return false;
+        
+        // Converter para objeto
+        const filtros = JSON.parse(filtrosSalvos);
+        
+        // Aplicar os valores aos inputs de filtro
+        if (searchInput) searchInput.value = filtros.busca || '';
+        if (regionFilter) regionFilter.value = filtros.regiao || '';
+        
+        // Se tiver região selecionada, precisamos atualizar o select de estados primeiro
+        if (regionFilter && regionFilter.value && stateFilter) {
+            preencherSelectEstados(stateFilter, regionFilter.value);
+            // Então aplicar o valor do estado
+            if (stateFilter) stateFilter.value = filtros.estado || '';
+        }
+        
+        if (statusFilter) statusFilter.value = filtros.status || '';
+        if (totemFilter) totemFilter.value = filtros.totem || '';
+        
+        console.log('Filtros carregados com sucesso');
+        return true;
+    } catch (error) {
+        console.error('Erro ao carregar filtros salvos:', error);
+        return false;
+    }
+}
+
+// Função para limpar todos os filtros e remover do localStorage
+function limparFiltros() {
+    if (searchInput) searchInput.value = '';
+    if (regionFilter) regionFilter.value = '';
+    if (stateFilter) {
+        stateFilter.innerHTML = '<option value="">Todos os Estados</option>';
+        stateFilter.value = '';
+    }
+    if (statusFilter) statusFilter.value = '';
+    if (totemFilter) totemFilter.value = '';
+    
+    // Remover do localStorage
+    localStorage.removeItem(FILTERS_KEY);
+    
+    // Aplicar filtros (agora todos vazios) com debounce
+    filtrarLojasDebounced();
+}
+
+// Função para atualizar a badge de fonte de dados
+function atualizarBadgeFonteDados(fonte, tempoAtras = null) {
+    const badge = document.getElementById('data-source-badge');
+    const textoElement = document.getElementById('data-source-text');
+    
+    if (!badge || !textoElement) return;
+    
+    badge.classList.remove('d-none', 'bg-light', 'bg-primary', 'bg-success', 'bg-warning', 'bg-danger');
+    
+    let texto = '';
+    let icone = '';
+    let classe = '';
+    
+    switch (fonte) {
+        case 'cache':
+            texto = `Dados do cache (${tempoAtras})`;
+            icone = 'database';
+            classe = 'bg-warning text-dark';
+            break;
+        case 'firebase':
+            texto = 'Dados em tempo real';
+            icone = 'cloud-download-alt';
+            classe = 'bg-primary text-white';
+            break;
+        case 'atualizado':
+            texto = 'Dados atualizados';
+            icone = 'sync-alt';
+            classe = 'bg-success text-white';
+            break;
+        case 'erro':
+            texto = 'Erro ao carregar dados';
+            icone = 'exclamation-triangle';
+            classe = 'bg-danger text-white';
+            break;
+        default:
+            texto = 'Origem desconhecida';
+            icone = 'question-circle';
+            classe = 'bg-light text-dark';
+    }
+    
+    // Atualizar a classe e o texto da badge
+    badge.className = `badge ${classe}`;
+    textoElement.innerHTML = texto;
+    
+    // Atualizar o ícone
+    const iconeElement = badge.querySelector('i');
+    if (iconeElement) {
+        iconeElement.className = `fas fa-${icone} me-1`;
+    }
+    
+    // Mostrar a badge
+    badge.classList.remove('d-none');
+    
+    // Adicionar evento de clique para exibir mais informações
+    badge.style.cursor = 'pointer';
+    badge.title = 'Clique para mais informações';
+    
+    // Remover qualquer listener anterior para evitar duplicação
+    const newBadge = badge.cloneNode(true);
+    badge.parentNode.replaceChild(newBadge, badge);
+    
+    newBadge.addEventListener('click', () => {
+        Swal.fire({
+            title: 'Informações sobre os dados',
+            html: `
+                <div class="text-start">
+                    <p>Status atual: <strong>${texto}</strong></p>
+                    ${fonte === 'cache' ? `
+                        <p>Os dados estão sendo exibidos do cache local para melhorar o desempenho e reduzir o tráfego com o Firebase.</p>
+                        <p>Última atualização: <strong>${tempoAtras}</strong></p>
+                    ` : ''}
+                    ${fonte === 'firebase' ? `
+                        <p>Os dados foram carregados diretamente do Firebase e estão atualizados.</p>
+                    ` : ''}
+                    ${fonte === 'atualizado' ? `
+                        <p>Os dados foram inicialmente carregados do cache e depois atualizados com dados do Firebase.</p>
+                    ` : ''}
+                    ${fonte === 'erro' ? `
+                        <p class="text-danger">Ocorreu um erro ao carregar os dados do Firebase. Os dados exibidos podem estar desatualizados.</p>
+                    ` : ''}
+                    <hr>
+                    <p class="mt-3">Ações disponíveis:</p>
+                    <ul>
+                        <li>Clique em "Atualizar agora" para recarregar os dados do Firebase</li>
+                        <li>Clique em "Limpar cache" para remover os dados em cache</li>
+                    </ul>
+                </div>
+            `,
+            icon: fonte === 'erro' ? 'error' : 'info',
+            showCancelButton: true,
+            confirmButtonText: 'Atualizar agora',
+            cancelButtonText: 'Limpar cache',
+            showDenyButton: true,
+            denyButtonText: 'Fechar',
+            confirmButtonColor: '#0d6efd',
+            cancelButtonColor: '#dc3545',
+            denyButtonColor: '#6c757d'
+        }).then((result) => {
+            if (result.isConfirmed) {
+                // Atualizar dados do Firebase
+                window.location.reload();
+            } else if (result.dismiss === Swal.DismissReason.cancel) {
+                // Limpar cache
+                try {
+                    localStorage.removeItem(CACHE_KEY_LOJAS);
+                    localStorage.removeItem(CACHE_KEY_TIMESTAMP);
+                    Swal.fire({
+                        icon: 'success',
+                        title: 'Cache limpo',
+                        text: 'Os dados serão recarregados do Firebase na próxima visita.',
+                        confirmButtonColor: '#0d6efd'
+                    }).then(() => {
+                        // Recarregar a página para atualizar os dados
+                        window.location.reload();
+                    });
+                } catch (error) {
+                    console.error("Erro ao limpar cache:", error);
+                    Swal.fire({
+                        icon: 'error',
+                        title: 'Erro',
+                        text: 'Não foi possível limpar o cache: ' + error.message,
+                        confirmButtonColor: '#0d6efd'
+                    });
+                }
+            }
+        });
+    });
+}
+
 

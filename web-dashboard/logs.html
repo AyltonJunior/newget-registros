@@ -421,7 +421,10 @@
                     <a href="#" id="change-password" class="sidebar-user-action">
                         <i class="fas fa-key"></i> Alterar Senha
                     </a>
-                    <a href="#" id="btnLogout" class="sidebar-user-action sidebar-user-action-danger">
+                    <a href="#" id="clear-cache" class="sidebar-user-action">
+                        <i class="fas fa-broom"></i> Limpar Cache
+                    </a>
+                    <a href="#" id="logout-btn" class="sidebar-user-action sidebar-user-action-danger">
                         <i class="fas fa-sign-out-alt"></i> Sair
                     </a>
                 </div>
@@ -437,6 +440,10 @@
                     </button>
                     <h5 class="mb-0 text-primary">Registro de Ações</h5>
                     <div class="ms-auto">
+                        <span id="data-source-badge" class="badge bg-light text-dark d-none">
+                            <i class="fas fa-database me-1"></i>
+                            <span id="data-source-text">Carregando...</span>
+                        </span>
                         <button class="btn btn-outline-primary" type="button" data-bs-toggle="collapse" data-bs-target="#collapseFilters" aria-expanded="false" aria-controls="collapseFilters">
                             <i class="fas fa-filter me-1"></i>Filtros
                         </button>

@@ -28,6 +28,9 @@ const secadoraCardTemplate = document.getElementById('secadora-card-template');
 const dosadoraCardTemplate = document.getElementById('dosadora-card-template');
 const arCardTemplate = document.getElementById('ar-card-template');
 
+// Refer�ncia para o hist�rico de status no Firebase
+const statusHistoryRef = database.ref(`status_history/${lojaId}`);
+
 // Sistema de alertas modernos
 let alertModal = null;
 let confirmModal = null;
@@ -317,53 +320,18 @@ function formatarData(timestamp) {
 
 // Função para determinar o status da loja
 function determinarStatus(loja) {
-    // Verifica se existe o nó de status
-    if (loja.pc_status && loja.pc_status.timestamp) {
-        let ultimaAtualizacao = loja.pc_status.timestamp;
-        console.log("determinarStatus - timestamp original:", ultimaAtualizacao, typeof ultimaAtualizacao);
-        
-        // Se for uma string, converter para número
-        if (typeof ultimaAtualizacao === 'string') {
-            ultimaAtualizacao = Number(ultimaAtualizacao);
-            console.log("Convertido de string para número:", ultimaAtualizacao);
-        }
-        
-        // Se não for um número, tentar converter
-        if (typeof ultimaAtualizacao !== 'number') {
-            ultimaAtualizacao = parseInt(ultimaAtualizacao);
-            if (isNaN(ultimaAtualizacao)) {
-                console.error("Timestamp inválido em determinarStatus:", ultimaAtualizacao);
-                return { status: "Offline", classe: "bg-danger", indicador: "status-offline" };
-            }
-        }
-        
-        // CORREÇÃO PARA DATAS EM SEGUNDOS VS MILISSEGUNDOS:
-        const timestampDate = new Date(ultimaAtualizacao);
-        const timestampYear = timestampDate.getFullYear();
-        
-        // Se o ano da data for antes de 2010 ou após 2050, provavelmente está no formato errado
-        if (timestampYear < 2010 || timestampYear > 2050) {
-            // Multiplicamos por 1000 para converter de segundos para ms
-            ultimaAtualizacao = ultimaAtualizacao * 1000;
-            console.log("Timestamp ajustado em determinarStatus:", ultimaAtualizacao);
-        }
-        
-        const agora = Date.now();
-        const diferenca = agora - ultimaAtualizacao;
-        
-        console.log("Timestamp atual:", agora, "Diferença:", diferenca, "ms", Math.floor(diferenca/1000/60), "minutos");
-        
-        // Se a última atualização foi há menos de 1 minuto, considera online
-        if (diferenca < 1 * 60 * 1000) {
+    // Retornar diretamente o status recebido do Firebase, sem verificações
+    if (loja.pc_status && loja.pc_status.status) {
+        // Usa o status definido diretamente no Firebase
+        if (loja.pc_status.status === "Online") {
             return { status: "Online", classe: "bg-success", indicador: "status-online" };
-        } 
-        // Caso contrário, considera offline - removido o estado "Alerta"
-        else {
+        } else {
             return { status: "Offline", classe: "bg-danger", indicador: "status-offline" };
         }
     }
     
-    return { status: "Offline", classe: "bg-danger", indicador: "status-offline" };
+    // Valor padrão se não houver status definido
+    return { status: "Indefinido", classe: "bg-secondary", indicador: "status-undefined" };
 }
 
 // Função para criar um card de lavadora
@@ -377,8 +345,7 @@ function criarCardLavadora(id, dados) {
         deviceIdElement.textContent = id;
     }
     
-    // Status de conexão
-    const statusInfo = determinarStatus({ pc_status: { timestamp: Date.now() - Math.random() * 1000000 } });
+    // Status de conexão - não usa verificações de tempo
     const statusBadge = card.querySelector('.device-status');
     const statusIndicator = card.querySelector('.status-indicator');
     
@@ -1446,7 +1413,7 @@ function carregarLavadoras() {
         lavadorasContainer.appendChild(loadingElement);
     }
     
-    // Referência às lavadoras no Firebase
+    // Referência � s lavadoras no Firebase
     const dosadorasRef = database.ref(`/${lojaId}/dosadora_01`);
     const lavadorasStatusRef = database.ref(`/${lojaId}/lavadoras`);
     const statusRef = database.ref(`/${lojaId}/status`);
@@ -1843,38 +1810,35 @@ function carregarAr() {
         });
 }
 
-// Função para verificar o status da loja
+// Função para verificar status da loja em tempo real
 function verificarStatusLoja() {
-    // Referência ao status da loja no Firebase
+    // Referência ao status no Firebase
     const statusRef = database.ref(`/${lojaId}/pc_status`);
     
-    statusRef.once('value')
-        .then(snapshot => {
-            const statusData = snapshot.val();
-            console.log("Dados de status recebidos:", statusData);
+    // Listener para o status da loja
+    statusRef.on('value', (snapshot) => {
+        // Obtém o elemento para mostrar status da loja
+        const lojaStatusElement = document.getElementById('loja-status');
+        const cardLoja = document.querySelector('.card-status-loja');
+        
+        // Status vem diretamente do Firebase, sem cálculos de tempo
+        if (snapshot.exists()) {
+            const statusFirebase = snapshot.val();
             
-            if (statusData && statusData.timestamp) {
-                console.log("Timestamp recebido:", statusData.timestamp, typeof statusData.timestamp);
+            // Usa o status definido diretamente no Firebase
+            const statusInfo = { 
+                status: statusFirebase.status || "Indefinido",
+                classe: statusFirebase.status === "Online" ? "bg-success" : "bg-danger",
+                indicador: statusFirebase.status === "Online" ? "status-online" : "status-offline"
+            };
                 
-                const statusInfo = determinarStatus({ pc_status: statusData });
-                console.log("Status determinado:", statusInfo);
-                
-                // Verifica se o timestamp está em segundos ou milissegundos para exibição
-                let timestamp = statusData.timestamp;
-                
-                // Atualiza o elemento de status com informações completas
-                lojaStatusElement.innerHTML = `
-                    <span class="status-indicator ${statusInfo.indicador}"></span>
-                    Status: ${statusInfo.status} - Última atualização: ${formatarData(timestamp)}
-                `;
-                
-                // Adiciona data-attribute para permitir verificação externa
+            // Atualiza texto de status da loja
                 if (lojaStatusElement) {
-                    lojaStatusElement.dataset.status = statusInfo.status.toLowerCase();
+                lojaStatusElement.textContent = statusInfo.status;
+                lojaStatusElement.className = `badge ${statusInfo.classe}`;
                 }
                 
-                // Atualiza também o status visual do card da loja na página
-                const cardLoja = document.querySelector('.card');
+            // Atualiza o card de status da loja
                 if (cardLoja) {
                     // Atualiza o badge de status
                     let badgeElement = cardLoja.querySelector('.badge');
@@ -1884,143 +1848,13 @@ function verificarStatusLoja() {
                     }
                 }
                 
-                // Habilitar/desabilitar as abas de dispositivos com base no status
-                const deviceTabs = document.querySelectorAll('#deviceTabs .nav-link');
-                const tabContents = document.querySelectorAll('.tab-pane');
-                
-                if (statusInfo.status === "Offline") {
-                    // Adicionar mensagem de offline na página
-                    const mensagemOffline = document.getElementById('mensagem-offline');
-                    if (!mensagemOffline) {
-                        const mensagemDiv = document.createElement('div');
-                        mensagemDiv.id = 'mensagem-offline';
-                        mensagemDiv.className = 'alert alert-danger mt-3';
-                        mensagemDiv.innerHTML = `
-                            <i class="fas fa-exclamation-circle me-2"></i>
-                            <strong>Loja Offline!</strong> Os dispositivos estão indisponíveis no momento. 
-                            O sistema tentará reconectar automaticamente quando a loja estiver online.
-                        `;
-                        
-                        // Inserir mensagem logo após o status da loja
-                        if (lojaStatusElement && lojaStatusElement.parentNode) {
-                            lojaStatusElement.parentNode.insertBefore(mensagemDiv, lojaStatusElement.nextSibling);
-                        }
-                    }
-                    
-                    // Desabilitar todas as abas exceto "Totem"
-                    deviceTabs.forEach(tab => {
-                        if (tab.id !== 'reset-tab') {
-                            tab.classList.add('disabled');
-                            tab.setAttribute('aria-disabled', 'true');
-                            tab.style.opacity = '0.5';
-                            tab.style.cursor = 'not-allowed';
-                            
-                            // Remover o evento de clique
-                            tab.addEventListener('click', function(e) {
-                                if (statusInfo.status === "Offline") {
-                                    e.preventDefault();
-                                    e.stopPropagation();
-                                    return false;
-                                }
-                            });
-                        }
-                    });
-                    
-                    // Adicionar mensagem de offline em cada tab-pane
-                    tabContents.forEach(pane => {
-                        if (pane.id !== 'reset') {
-                            const mensagemTab = pane.querySelector('.mensagem-tab-offline');
-                            if (!mensagemTab) {
-                                const mensagemTabDiv = document.createElement('div');
-                                mensagemTabDiv.className = 'alert alert-danger mensagem-tab-offline';
-                                mensagemTabDiv.innerHTML = `
-                                    <i class="fas fa-exclamation-circle me-2"></i>
-                                    Dispositivos indisponíveis - Loja offline
-                                `;
-                                pane.prepend(mensagemTabDiv);
-                            }
-                        }
-                    });
+            // ... resto da função ...
             } else {
-                    // Remover mensagem de offline se existir
-                    const mensagemOffline = document.getElementById('mensagem-offline');
-                    if (mensagemOffline) {
-                        mensagemOffline.remove();
-                    }
-                    
-                    // Habilitar todas as abas
-                    deviceTabs.forEach(tab => {
-                        tab.classList.remove('disabled');
-                        tab.removeAttribute('aria-disabled');
-                        tab.style.opacity = '';
-                        tab.style.cursor = '';
-                    });
-                    
-                    // Remover mensagens de offline em cada tab-pane
-                    document.querySelectorAll('.mensagem-tab-offline').forEach(mensagem => {
-                        mensagem.remove();
-                    });
-                }
-            } else {
-                console.warn("Dados de status ausentes ou sem timestamp");
-                lojaStatusElement.innerHTML = `
-                    <span class="status-indicator status-offline"></span>
-                    Status: Offline - Sem dados de status disponíveis
-                `;
-                
+            // Se não existir status, define como Indefinido
                 if (lojaStatusElement) {
-                    lojaStatusElement.dataset.status = 'offline';
-                }
-                
-                // Atualiza também o status visual do card da loja na página
-                const cardLoja = document.querySelector('.card');
-                if (cardLoja) {
-                    // Atualiza o badge de status
-                    let badgeElement = cardLoja.querySelector('.badge');
-                    if (badgeElement) {
-                        badgeElement.textContent = 'Offline';
-                        badgeElement.className = 'badge bg-danger';
-                    }
-                }
-                
-                // Desabilitar todas as abas exceto "Totem" (mesmo código que acima)
-                const deviceTabs = document.querySelectorAll('#deviceTabs .nav-link');
-                deviceTabs.forEach(tab => {
-                    if (tab.id !== 'reset-tab') {
-                        tab.classList.add('disabled');
-                        tab.setAttribute('aria-disabled', 'true');
-                        tab.style.opacity = '0.5';
-                        tab.style.cursor = 'not-allowed';
-                    }
-                });
-                
-                // Adicionar mensagem de offline na página
-                const mensagemOffline = document.getElementById('mensagem-offline');
-                if (!mensagemOffline) {
-                    const mensagemDiv = document.createElement('div');
-                    mensagemDiv.id = 'mensagem-offline';
-                    mensagemDiv.className = 'alert alert-danger mt-3';
-                    mensagemDiv.innerHTML = `
-                        <i class="fas fa-exclamation-circle me-2"></i>
-                        <strong>Loja Offline!</strong> Os dispositivos estão indisponíveis no momento.
-                    `;
-                    
-                    // Inserir mensagem logo após o status da loja
-                    if (lojaStatusElement && lojaStatusElement.parentNode) {
-                        lojaStatusElement.parentNode.insertBefore(mensagemDiv, lojaStatusElement.nextSibling);
-                    }
-                }
+                lojaStatusElement.textContent = "Indefinido";
+                lojaStatusElement.className = "badge bg-secondary";
             }
-        })
-        .catch(error => {
-            console.error("Erro ao verificar status da loja:", error);
-            lojaStatusElement.innerHTML = `
-                <span class="status-indicator status-offline"></span>
-                Status: Offline - Erro ao verificar
-            `;
-            
-            if (lojaStatusElement) {
-                lojaStatusElement.dataset.status = 'offline';
             }
         });
 }
@@ -2141,6 +1975,779 @@ document.getElementById('btn-salvar-tempos').addEventListener('click', function(
     });
 });
 
+// Elementos de status_machine
+const statusMachineTableBody = document.getElementById('status-machine-table-body');
+const otherDevicesTableBody = document.getElementById('other-devices-table-body');
+const statusHistoryTableBody = document.getElementById('status-history-table-body');
+const refreshStatusMachinesBtn = document.getElementById('refresh-status-machines');
+const refreshOtherDevicesBtn = document.getElementById('refresh-other-devices');
+
+// Dados de status de máquinas
+let machinesStatusData = [];
+let statusHistory = [];
+
+// ... existing code ...
+
+// Função para carregar os dados de status_machine
+function carregarStatusMachines(forceRefresh = false) {
+    console.log('Carregando dados de status das máquinas da loja:', lojaId);
+    
+    // Mostrar spinner na tabela de lavadoras e secadoras
+    if (statusMachineTableBody) {
+        statusMachineTableBody.innerHTML = `
+            <tr>
+                <td colspan="5" class="text-center py-4">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Carregando...</span>
+                    </div>
+                    <p class="mt-2">Carregando lavadoras e secadoras...</p>
+                </td>
+            </tr>
+        `;
+    }
+    
+    // Mostrar spinner na tabela de outros dispositivos
+    if (otherDevicesTableBody) {
+        otherDevicesTableBody.innerHTML = `
+            <tr>
+                <td colspan="4" class="text-center py-4">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Carregando...</span>
+                    </div>
+                    <p class="mt-2">Carregando dosadoras, ar-condicionado e totem...</p>
+                </td>
+            </tr>
+        `;
+    }
+    
+    // Buscar dados no Firebase (tanto status quanto status_machine)
+    Promise.all([
+        database.ref(`/${lojaId}/status`).once('value'),
+        database.ref(`/${lojaId}/status_machine`).once('value'),
+        buscarDadosApiExterna() // Adicionar chamada � API externa
+    ])
+    .then(([statusSnapshot, statusMachineSnapshot, apiData]) => {
+        const statusData = statusSnapshot.val() || {};
+        const statusMachineData = statusMachineSnapshot.val() || {};
+        
+        console.log('Dados de status recebidos:', statusData);
+        console.log('Dados de status_machine recebidos:', statusMachineData);
+        
+        const machinesData = [];
+        
+        // Processar lavadoras
+        if (statusData.lavadoras) {
+            Object.keys(statusData.lavadoras).forEach(id => {
+                // Obter disponibilidade do status_machine, se disponível
+                const availability = statusMachineData && 
+                                    statusMachineData[id] ? 
+                                    statusMachineData[id].status || 'unknown' : 
+                                    'unknown';
+                
+                machinesData.push({
+                    tipo: 'Lavadora',
+                    id: id,
+                    status: statusData.lavadoras[id] || 'desconhecido',
+                    availability: availability,
+                    availabilityTimestamp: Date.now(),
+                    lastUpdate: Date.now(),
+                    historico: []
+                });
+            });
+        }
+        
+        // Processar secadoras
+        if (statusData.secadoras) {
+            Object.keys(statusData.secadoras).forEach(id => {
+                // Obter disponibilidade do status_machine, se disponível
+                const availability = statusMachineData && 
+                                    statusMachineData[id] ? 
+                                    statusMachineData[id].status || 'unknown' : 
+                                    'unknown';
+                
+                machinesData.push({
+                    tipo: 'Secadora',
+                    id: id,
+                    status: statusData.secadoras[id] || 'desconhecido',
+                    availability: availability,
+                    availabilityTimestamp: Date.now(),
+                    lastUpdate: Date.now(),
+                    historico: []
+                });
+            });
+        }
+        
+        // Processar dosadoras
+        if (statusData.dosadoras) {
+            Object.keys(statusData.dosadoras).forEach(id => {
+                // Obter disponibilidade do status_machine, se disponível
+                const availability = statusMachineData && 
+                                    statusMachineData[id] ? 
+                                    statusMachineData[id].status || 'unknown' : 
+                                    'unknown';
+                
+                machinesData.push({
+                    tipo: 'Dosadora',
+                    id: id,
+                    status: statusData.dosadoras[id] || 'desconhecido',
+                    availability: availability,
+                    availabilityTimestamp: Date.now(),
+                    lastUpdate: Date.now(),
+                    historico: []
+                });
+            });
+        }
+        
+        // Processar ar condicionado
+        if (statusData.ar_condicionado) {
+            // Obter disponibilidade do status_machine, se disponível
+            const availability = statusMachineData && 
+                                statusMachineData['AC-01'] ? 
+                                statusMachineData['AC-01'].status || 'unknown' : 
+                                'unknown';
+            
+            machinesData.push({
+                tipo: 'Ar-Condicionado',
+                id: 'AC-01',
+                status: statusData.ar_condicionado || 'desconhecido',
+                availability: availability,
+                availabilityTimestamp: Date.now(),
+                lastUpdate: Date.now(),
+                historico: []
+            });
+        }
+        
+        // Adicionar entrada para o totem/PC
+        if (statusData.pc_online !== undefined) {
+            // Totem não tem uma propriedade availability específica
+            machinesData.push({
+                tipo: 'Totem',
+                id: 'PC-01',
+                status: statusData.pc_online ? 'online' : 'offline',
+                availability: 'unknown', // Totem não tem estado de disponibilidade
+                availabilityTimestamp: Date.now(),
+                lastUpdate: Date.now(),
+                historico: []
+            });
+        }
+        
+        // Atualizar dados globais com as informações da API, se disponíveis
+        if (apiData) {
+            machinesStatusData = atualizarDadosComApi(machinesData, apiData);
+        } else {
+            machinesStatusData = machinesData;
+        }
+        
+        // Renderizar tabela
+        renderizarTabelaStatusMachines();
+        
+        // Configurar listeners para monitorar alterações em tempo real
+        configurarListenersStatus();
+    })
+    .catch(error => {
+        console.error('Erro ao carregar status das máquinas:', error);
+        
+        // Mostrar erro na tabela de lavadoras e secadoras
+        if (statusMachineTableBody) {
+            statusMachineTableBody.innerHTML = `
+                <tr>
+                    <td colspan="5" class="text-center py-4">
+                        <div class="alert alert-danger">
+                            <i class="fas fa-exclamation-circle me-2"></i>
+                            Erro ao carregar lavadoras e secadoras: ${error.message}
+                        </div>
+                    </td>
+                </tr>
+            `;
+        }
+        
+        // Mostrar erro na tabela de outros dispositivos
+        if (otherDevicesTableBody) {
+            otherDevicesTableBody.innerHTML = `
+                <tr>
+                    <td colspan="4" class="text-center py-4">
+                        <div class="alert alert-danger">
+                            <i class="fas fa-exclamation-circle me-2"></i>
+                            Erro ao carregar outros dispositivos: ${error.message}
+                        </div>
+                    </td>
+                </tr>
+            `;
+        }
+    });
+}
+
+// Função para configurar listeners de status em tempo real
+function configurarListenersStatus() {
+    const statusRef = database.ref(`/${lojaId}/status`);
+    const statusMachineRef = database.ref(`/${lojaId}/status_machine`);
+    
+    // Listener para lavadoras
+    statusRef.child('lavadoras').on('child_changed', (snapshot) => {
+        const id = snapshot.key;
+        const status = snapshot.val();
+        
+        atualizarStatusMachine('Lavadora', id, status);
+    });
+    
+    // Listener para secadoras
+    statusRef.child('secadoras').on('child_changed', (snapshot) => {
+        const id = snapshot.key;
+        const status = snapshot.val();
+        
+        atualizarStatusMachine('Secadora', id, status);
+    });
+    
+    // Listener para dosadoras
+    statusRef.child('dosadoras').on('child_changed', (snapshot) => {
+        const id = snapshot.key;
+        const status = snapshot.val();
+        
+        atualizarStatusMachine('Dosadora', id, status);
+    });
+    
+    // Listener para ar condicionado
+    statusRef.child('ar_condicionado').on('value', (snapshot) => {
+        const status = snapshot.val();
+        
+        atualizarStatusMachine('Ar-Condicionado', 'AC-01', status);
+    });
+    
+    // Listener para PC/totem
+    statusRef.child('pc_online').on('value', (snapshot) => {
+        const online = snapshot.val();
+        const status = online ? 'online' : 'offline';
+        
+        atualizarStatusMachine('Totem', 'PC-01', status);
+    });
+    
+    // Listener para status_machine
+    statusMachineRef.on('child_changed', (snapshot) => {
+        const id = snapshot.key;
+        const machineData = snapshot.val();
+        
+        // Buscar na lista de dados atuais
+        const machine = machinesStatusData.find(m => m.id === id);
+        if (machine) {
+            // Apenas atualizar disponibilidade para lavadoras e secadoras
+            if (machine.tipo === 'Lavadora' || machine.tipo === 'Secadora') {
+                // Verificar se o status de disponibilidade mudou
+                if (machine.availability !== (machineData.status || 'unknown')) {
+                    // Atualizar o timestamp apenas se a disponibilidade mudou
+                    machine.availabilityTimestamp = Date.now();
+                    
+                    // Registrar no histórico a mudança de disponibilidade
+                    if (!machine.historico) {
+                        machine.historico = [];
+                    }
+                    
+                    machine.historico.unshift({
+                        timestamp: Date.now(),
+                        status: machine.status, // Status de conexão permanece o mesmo
+                        availability: machineData.status || 'unknown',
+                        evento: `Alteração de disponibilidade: ${machine.availability} → ${machineData.status || 'unknown'}`
+                    });
+                    
+                    // Limitar histórico a 10 entradas
+                    if (machine.historico.length > 10) {
+                        machine.historico = machine.historico.slice(0, 10);
+                    }
+                }
+                
+                // Atualizar apenas o campo de disponibilidade (availability)
+                machine.availability = machineData.status || 'unknown';
+            }
+            
+            // Renderizar a tabela com os dados atualizados
+            renderizarTabelaStatusMachines();
+        }
+    });
+}
+
+// Função para atualizar o status de uma máquina
+function atualizarStatusMachine(tipo, id, status) {
+    console.log(`Atualizando status: ${tipo} ${id} -> ${status}`);
+    
+    // Encontrar a máquina nos dados
+    const machineIndex = machinesStatusData.findIndex(m => 
+        m.tipo === tipo && m.id === id
+    );
+    
+    if (machineIndex === -1) {
+        // Máquina não encontrada, adicionar nova
+        machinesStatusData.push({
+            tipo: tipo,
+            id: id,
+            status: status,
+            lastUpdate: Date.now(),
+            historico: [{
+                timestamp: Date.now(),
+                status: status,
+                evento: 'Status inicial'
+            }]
+        });
+    } else {
+        // Máquina encontrada, verificar se o status mudou
+        const currentStatus = machinesStatusData[machineIndex].status;
+        
+        if (currentStatus !== status) {
+            // Status mudou, adicionar ao histórico
+            if (!machinesStatusData[machineIndex].historico) {
+                machinesStatusData[machineIndex].historico = [];
+            }
+            
+            machinesStatusData[machineIndex].historico.unshift({
+                timestamp: Date.now(),
+                status: status,
+                evento: `Alteração de status: ${currentStatus} → ${status}`
+            });
+            
+            // Limitar histórico a 10 entradas
+            if (machinesStatusData[machineIndex].historico.length > 10) {
+                machinesStatusData[machineIndex].historico = 
+                    machinesStatusData[machineIndex].historico.slice(0, 10);
+            }
+            
+            // Atualizar status atual e timestamp
+            machinesStatusData[machineIndex].status = status;
+            machinesStatusData[machineIndex].lastUpdate = Date.now();
+            
+            // Criar objeto de hist�rico com o evento de altera��o
+            const historyEntry = {
+                timestamp: Date.now(),
+                tipo: tipo,
+                id: id,
+                status: status,
+                evento: `Alteração de status: ${currentStatus} → ${status}`
+            };
+            
+            // Atualizar histórico global para a tabela de histórico
+            statusHistory.unshift(historyEntry);
+            
+            // Limitar histórico global a 50 entradas
+            if (statusHistory.length > 50) {
+                statusHistory = statusHistory.slice(0, 50);
+            }
+            
+            // Salvar a entrada de hist�rico no Firebase
+            const newHistoryRef = statusHistoryRef.push();
+            newHistoryRef.set(historyEntry)
+                .then(() => {
+                    console.log("Histórico de status salvo no banco de dados");
+                })
+                .catch(error => {
+                    console.error("Erro ao salvar histórico de status:", error);
+                });
+            
+            // Renderizar o histórico
+            renderizarHistoricoStatus();
+        }
+    }
+    
+    // Atualizar a tabela
+    renderizarTabelaStatusMachines();
+}
+
+// Função para renderizar a tabela de status
+function renderizarTabelaStatusMachines() {
+    if (!statusMachineTableBody || !otherDevicesTableBody) return;
+    
+    // Separar os dispositivos em duas categorias
+    const washersAndDryers = machinesStatusData.filter(m => m.tipo === 'Lavadora' || m.tipo === 'Secadora');
+    const otherDevices = machinesStatusData.filter(m => !washersAndDryers.includes(m));
+    
+    // TABELA 1: LAVADORAS E SECADORAS
+    // ----------------------------
+    
+    // Limpar a tabela
+    statusMachineTableBody.innerHTML = '';
+    
+    // Verificar se há dados
+    if (washersAndDryers.length === 0) {
+        statusMachineTableBody.innerHTML = `
+            <tr>
+                <td colspan="5" class="text-center py-4">
+                    <div class="alert alert-info">
+                        <i class="fas fa-info-circle me-2"></i>
+                        Nenhuma lavadora ou secadora disponível.
+                    </div>
+                </td>
+            </tr>
+        `;
+    } else {
+        // Adicionar cada lavadora/secadora à tabela
+        washersAndDryers.forEach(machine => {
+            const tr = document.createElement('tr');
+            
+            // Formatar status com badge colorida
+            const statusHtml = machine.status === 'online' ? 
+                `<span class="badge bg-success">Online</span>` : 
+                machine.status === 'offline' ? 
+                `<span class="badge bg-danger">Offline</span>` : 
+                machine.status === 'liberando' || machine.status === 'processando' ? 
+                `<span class="badge bg-info">Processando</span>` : 
+                `<span class="badge bg-secondary">${machine.status}</span>`;
+            
+            // Formatar disponibilidade com badge colorida
+            let availabilityHtml = '';
+            
+            switch (machine.availability) {
+                case 'available':
+                    availabilityHtml = `<span class="badge bg-success">Disponível</span>`;
+                    break;
+                case 'busy':
+                    // Remover a informação de tempo, mantendo apenas a badge
+                    availabilityHtml = `<span class="badge bg-warning text-dark">Ocupada</span>`;
+                    break;
+                case 'suspended':
+                    // Remover a informação de tempo, mantendo apenas a badge
+                    availabilityHtml = `<span class="badge bg-secondary">Suspensa</span>`;
+                    break;
+                case 'unknown':
+                default:
+                    availabilityHtml = `<span class="badge bg-light text-dark">Indeterminado</span>`;
+                    break;
+            }
+            
+            // Formatar última atualização
+            const lastUpdateText = formatarTempoRelativo(Date.now() - machine.lastUpdate);
+            
+            tr.innerHTML = `
+                <td>${machine.tipo}</td>
+                <td>${machine.id}</td>
+                <td>${statusHtml}</td>
+                <td>${availabilityHtml}</td>
+                
+                <td>
+                    <button class="btn btn-sm btn-outline-info view-machine-details" 
+                            data-tipo="${machine.tipo}" data-id="${machine.id}">
+                        <i class="fas fa-eye"></i>
+                    </button>
+                </td>
+            `;
+            
+            statusMachineTableBody.appendChild(tr);
+        });
+    }
+    
+    // TABELA 2: OUTROS DISPOSITIVOS (DOSADORAS, AR-CONDICIONADO, TOTEM)
+    // --------------------------------------------------------
+    
+    // Limpar a tabela
+    otherDevicesTableBody.innerHTML = '';
+    
+    // Verificar se há dados
+    if (otherDevices.length === 0) {
+        otherDevicesTableBody.innerHTML = `
+            <tr>
+                <td colspan="4" class="text-center py-4">
+                    <div class="alert alert-info">
+                        <i class="fas fa-info-circle me-2"></i>
+                        Nenhum outro dispositivo disponível.
+                    </div>
+                </td>
+            </tr>
+        `;
+    } else {
+        // Adicionar cada dispositivo tabela
+        otherDevices.forEach(machine => {
+            const tr = document.createElement('tr');
+            
+            // Formatar status com badge colorida
+            const statusHtml = machine.status === 'online' ? 
+                `<span class="badge bg-success">Online</span>` : 
+                machine.status === 'offline' ? 
+                `<span class="badge bg-danger">Offline</span>` : 
+                machine.status === 'liberando' || machine.status === 'processando' ? 
+                `<span class="badge bg-info">Processando</span>` : 
+                `<span class="badge bg-secondary">${machine.status}</span>`;
+            
+            // Formatar última atualização
+            const lastUpdateText = formatarTempoRelativo(Date.now() - machine.lastUpdate);
+            
+            tr.innerHTML = `
+                <td>${machine.tipo}</td>
+                <td>${machine.id}</td>
+                <td>${statusHtml}</td>
+                
+                <td>
+                    <button class="btn btn-sm btn-outline-info view-machine-details" 
+                            data-tipo="${machine.tipo}" data-id="${machine.id}">
+                        <i class="fas fa-eye"></i>
+                    </button>
+                </td>
+            `;
+            
+            otherDevicesTableBody.appendChild(tr);
+        });
+    }
+    
+    // Adicionar eventos aos botões de detalhes
+    document.querySelectorAll('.view-machine-details').forEach(btn => {
+        btn.addEventListener('click', function() {
+            const tipo = this.getAttribute('data-tipo');
+            const id = this.getAttribute('data-id');
+            
+            mostrarDetalhesMachine(tipo, id);
+        });
+    });
+}
+
+// Variáveis para paginação do histórico
+let paginaAtualHistorico = 1;
+let itensPorPaginaHistorico = 10;
+let historicoFiltradoAtual = [];
+
+// ... existing code ...
+
+// Função para renderizar o histórico de status
+function renderizarHistoricoStatus(pagina = 1, forceRefresh = false) {
+    if (!statusHistoryTableBody) return;
+    
+    // Se não for forçar a atualização, usar o número de itens por página atual
+    if (!forceRefresh) {
+        // Obter o valor do seletor de registros por página
+        const registrosPorPaginaSelect = document.getElementById('registros-por-pagina');
+        if (registrosPorPaginaSelect) {
+            const novoValor = parseInt(registrosPorPaginaSelect.value);
+            // Só atualizar se o valor mudou
+            if (novoValor !== itensPorPaginaHistorico) {
+                itensPorPaginaHistorico = novoValor;
+                // Se mudou o número de itens por página, reiniciar para a primeira página
+                pagina = 1;
+            }
+        }
+    }
+    
+    // Atualizar página atual
+    paginaAtualHistorico = pagina;
+    
+    // Limpar a tabela
+    statusHistoryTableBody.innerHTML = '';
+    
+    // Verificar se há dados
+    if (statusHistory.length === 0) {
+        statusHistoryTableBody.innerHTML = `
+            <tr>
+                <td colspan="5" class="text-center py-3">
+                    <i class="text-muted">Nenhum histórico disponível</i>
+                </td>
+            </tr>
+        `;
+        atualizarControlePaginacao(0, 0, 0);
+        return;
+    }
+    
+    // Obter o filtro selecionado
+    const filtroSelect = document.getElementById('filtro-historico');
+    const filtroTipo = filtroSelect ? filtroSelect.value : 'offline';
+    
+    // Filtrar o histórico conforme selecionado
+    let historicoFiltrado = statusHistory;
+    
+    if (filtroTipo === 'offline') {
+        // Filtrar apenas as entradas com status offline
+        historicoFiltrado = statusHistory.filter(entry => {
+            // Verificar se o status atual é offline
+            const isOfflineStatus = entry.status === "offline";
+            
+            // Verificar se o evento menciona transição para offline
+            const isOfflineEvent = (entry.evento.includes("online") && entry.evento.includes("offline")) || 
+                                  (entry.evento.includes("online") && entry.evento.includes("?") && entry.status === "offline");
+            
+            return isOfflineStatus && isOfflineEvent;
+        });
+    }
+    
+    // Armazenar o histórico filtrado atual para uso pela paginação
+    historicoFiltradoAtual = historicoFiltrado;
+    
+    // Verificar se há dados após a filtragem
+    if (historicoFiltrado.length === 0) {
+        statusHistoryTableBody.innerHTML = `
+            <tr>
+                <td colspan="5" class="text-center py-3">
+                    <i class="text-muted">Nenhuma ${filtroTipo === 'offline' ? 'alteração de status online para offline' : 'entrada de histórico'} disponível</i>
+                </td>
+            </tr>
+        `;
+        atualizarControlePaginacao(0, 0, 0);
+        return;
+    }
+    
+    // Calcular índices de paginação
+    const totalItens = historicoFiltrado.length;
+    const totalPaginas = Math.ceil(totalItens / itensPorPaginaHistorico);
+    
+    // Garantir que a página solicitada está dentro dos limites
+    if (paginaAtualHistorico < 1) paginaAtualHistorico = 1;
+    if (paginaAtualHistorico > totalPaginas) paginaAtualHistorico = totalPaginas;
+    
+    // Calcular índices de início e fim para a página atual
+    const indiceFinal = paginaAtualHistorico * itensPorPaginaHistorico;
+    const indiceInicial = indiceFinal - itensPorPaginaHistorico;
+    
+    // Obter apenas os itens da página atual
+    const itensDaPagina = historicoFiltrado.slice(indiceInicial, indiceFinal);
+    
+    // Adicionar cada entrada da página atual à tabela
+    itensDaPagina.forEach(entry => {
+        const tr = document.createElement("tr");
+        
+        // Formatar status com badge colorida
+        const statusHtml = entry.status === "online" ? 
+            `<span class="badge bg-success">Online</span>` : 
+            entry.status === "offline" ? 
+            `<span class="badge bg-danger">Offline</span>` : 
+            entry.status === "liberando" || entry.status === "processando" ? 
+            `<span class="badge bg-info">Processando</span>` : 
+            `<span class="badge bg-secondary">${entry.status}</span>`;
+        
+        // Formatar data e hora
+        const dataHora = formatarDataHora(entry.timestamp);
+        
+        tr.innerHTML = `
+            <td>${dataHora}</td>
+            <td>${entry.tipo}</td>
+            <td>${entry.id}</td>
+            <td>${statusHtml}</td>
+            <td>${entry.evento}</td>
+        `;
+        
+        statusHistoryTableBody.appendChild(tr);
+    });
+    
+    // Atualizar controles de paginação
+    atualizarControlePaginacao(indiceInicial + 1, Math.min(indiceFinal, totalItens), totalItens);
+}
+
+// Função para atualizar os controles de paginação
+function atualizarControlePaginacao(inicio, fim, total) {
+    // Atualizar texto de informação de paginação
+    const paginacaoInfo = document.getElementById('historico-paginacao-info');
+    if (paginacaoInfo) {
+        if (total === 0) {
+            paginacaoInfo.textContent = "Nenhum registro encontrado";
+        } else {
+            paginacaoInfo.textContent = `Mostrando ${inicio}-${fim} de ${total} registros`;
+        }
+    }
+    
+    // Atualizar os botões de navegação
+    const paginacao = document.getElementById('historico-paginacao');
+    if (!paginacao) return;
+    
+    // Calcular total de páginas
+    const totalPaginas = Math.ceil(total / itensPorPaginaHistorico);
+    
+    // Limpar paginação atual
+    paginacao.innerHTML = '';
+    
+    // Botão anterior
+    const itemAnterior = document.createElement('li');
+    itemAnterior.className = `page-item ${paginaAtualHistorico <= 1 ? 'disabled' : ''}`;
+    itemAnterior.innerHTML = `
+        <a class="page-link" href="#" aria-label="Anterior" id="historico-pagina-anterior">
+            <span aria-hidden="true">&laquo;</span>
+        </a>
+    `;
+    paginacao.appendChild(itemAnterior);
+    
+    // Determinar quais números de página mostrar
+    let paginasParaMostrar = [];
+    
+    if (totalPaginas <= 5) {
+        // Mostrar todas as páginas se forem 5 ou menos
+        for (let i = 1; i <= totalPaginas; i++) {
+            paginasParaMostrar.push(i);
+        }
+    } else {
+        // Sempre mostrar a primeira página
+        paginasParaMostrar.push(1);
+        
+        // Mostrar páginas ao redor da página atual
+        let inicio = Math.max(2, paginaAtualHistorico - 1);
+        let fim = Math.min(paginaAtualHistorico + 1, totalPaginas - 1);
+        
+        // Adicionar elipse se necessário
+        if (inicio > 2) {
+            paginasParaMostrar.push('...');
+        }
+        
+        // Adicionar páginas do meio
+        for (let i = inicio; i <= fim; i++) {
+            paginasParaMostrar.push(i);
+        }
+        
+        // Adicionar elipse se necessário
+        if (fim < totalPaginas - 1) {
+            paginasParaMostrar.push('...');
+        }
+        
+        // Sempre mostrar a última página
+        paginasParaMostrar.push(totalPaginas);
+    }
+    
+    // Adicionar números de página
+    paginasParaMostrar.forEach(numeroPagina => {
+        const itemPagina = document.createElement('li');
+        
+        if (numeroPagina === '...') {
+            // Elipse para indicar páginas omitidas
+            itemPagina.className = 'page-item disabled';
+            itemPagina.innerHTML = '<span class="page-link">...</span>';
+        } else {
+            // Número de página clicável
+            itemPagina.className = `page-item ${numeroPagina === paginaAtualHistorico ? 'active' : ''}`;
+            itemPagina.innerHTML = `<a class="page-link" href="#" data-pagina="${numeroPagina}">${numeroPagina}</a>`;
+        }
+        
+        paginacao.appendChild(itemPagina);
+    });
+    
+    // Botão próximo
+    const itemProximo = document.createElement('li');
+    itemProximo.className = `page-item ${paginaAtualHistorico >= totalPaginas ? 'disabled' : ''}`;
+    itemProximo.innerHTML = `
+        <a class="page-link" href="#" aria-label="Próximo" id="historico-proxima-pagina">
+            <span aria-hidden="true">&raquo;</span>
+        </a>
+    `;
+    paginacao.appendChild(itemProximo);
+    
+    // Adicionar eventos aos botões de navegação
+    const btnAnterior = document.getElementById('historico-pagina-anterior');
+    if (btnAnterior) {
+        btnAnterior.addEventListener('click', function(e) {
+            e.preventDefault();
+            if (paginaAtualHistorico > 1) {
+                renderizarHistoricoStatus(paginaAtualHistorico - 1);
+            }
+        });
+    }
+    
+    const btnProximo = document.getElementById('historico-proxima-pagina');
+    if (btnProximo) {
+        btnProximo.addEventListener('click', function(e) {
+            e.preventDefault();
+            if (paginaAtualHistorico < totalPaginas) {
+                renderizarHistoricoStatus(paginaAtualHistorico + 1);
+            }
+        });
+    }
+    
+    // Adicionar eventos aos números de página
+    document.querySelectorAll('#historico-paginacao .page-link[data-pagina]').forEach(link => {
+        link.addEventListener('click', function(e) {
+            e.preventDefault();
+            const pagina = parseInt(this.getAttribute('data-pagina'));
+            renderizarHistoricoStatus(pagina);
+        });
+    });
+}
+
+// ... existing code ...
+
 // Inicializa a aplicação quando o DOM estiver carregado
 document.addEventListener('DOMContentLoaded', () => {
     verificarStatusLoja();
@@ -2148,6 +2755,51 @@ document.addEventListener('DOMContentLoaded', () => {
     carregarSecadoras();
     carregarDosadoras();
     carregarAr();
+    
+    // Carregar status das máquinas e histórico
+    carregarStatusMachines();
+    carregarHistoricoStatus();
+    
+    // Carregar dados brutos do status_machine
+    carregarRawStatus();
+    
+    // Configurar botões de refresh
+    if (refreshStatusMachinesBtn) {
+        refreshStatusMachinesBtn.addEventListener('click', () => {
+            carregarStatusMachines(true);
+        });
+    }
+    
+    // Configurar botão de atualizar dados brutos
+    if (refreshRawStatusBtn) {
+        refreshRawStatusBtn.addEventListener('click', () => {
+            carregarRawStatus();
+        });
+    }
+    
+    if (refreshOtherDevicesBtn) {
+        refreshOtherDevicesBtn.addEventListener('click', () => {
+            carregarStatusMachines(true);
+        });
+    }
+    
+    // Configurar listener para o select de filtro de histórico
+    const filtroHistorico = document.getElementById('filtro-historico');
+    if (filtroHistorico) {
+        filtroHistorico.addEventListener('change', () => {
+            // Ao mudar o filtro, voltar para a primeira página
+            renderizarHistoricoStatus(1);
+        });
+    }
+    
+    // Configurar listener para o seletor de registros por página
+    const registrosPorPagina = document.getElementById('registros-por-pagina');
+    if (registrosPorPagina) {
+        registrosPorPagina.addEventListener('change', () => {
+            // Ao mudar a quantidade de registros, atualizar a tabela
+            renderizarHistoricoStatus(1);
+        });
+    }
     
     // Buscar o CEP da loja na API externa
     if (typeof exibirCEPLoja === 'function') {
@@ -2173,4 +2825,337 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
     }
+    
+    // Configurar os listeners para tab de raw status quando for selecionada
+    const rawStatusTab = document.getElementById('raw-status-tab');
+    if (rawStatusTab) {
+        rawStatusTab.addEventListener('shown.bs.tab', function (e) {
+            // Recarregar os dados quando a tab for selecionada
+            carregarRawStatus();
+        });
+    }
+    
+    // Configurar os listeners para tab de status quando for selecionada
+    const statusTab = document.getElementById('status-tab');
+    if (statusTab) {
+        statusTab.addEventListener('shown.bs.tab', function (e) {
+            // Recarregar os dados quando a tab for selecionada
+            carregarStatusMachines(true);
+        });
+    }
+    
+    // Configurar listener para o botão de reset de 1s
+    const btnReset1s = document.getElementById('btn-reset-1s');
+    if (btnReset1s) {
+        btnReset1s.addEventListener('click', () => enviarComandoReset('1s'));
+    }
 });
+
+// Função para buscar dados da API externa
+async function buscarDadosApiExterna() {
+    console.log('Buscando dados da API externa para a loja:', lojaId);
+    
+    try {
+        // Montar a URL com o código da loja
+        const url = `https://sistema.lavanderia60minutos.com.br/api/v1/machines?store_code=${lojaId}`;
+        
+        // Fazer a requisição para a API
+        const response = await fetch(url, {
+            method: 'GET',
+            headers: {
+                'X-Token': '1be10a9c20528183b64e3c69564db6958eab7f434ee94350706adb4efc261869',
+                'Content-Type': 'application/json'
+            }
+        });
+        
+        // Verificar se a requisição foi bem-sucedida
+        if (!response.ok) {
+            throw new Error(`Erro na requisição: ${response.status} ${response.statusText}`);
+        }
+        
+        // Converter a resposta para JSON
+        const data = await response.json();
+        
+        console.log('Dados da API externa recebidos:', data);
+        
+        // Verificar se a API retornou dados válidos
+        if (!data || !data.data || !Array.isArray(data.data)) {
+            console.warn('API retornou formato de dados inesperado:', data);
+            return null;
+        }
+        
+        // Processar e retornar os dados recebidos em um formato mais simples
+        return data.data.map(item => {
+            return {
+                name: item.attributes.name,
+                status: item.attributes.status,
+                type: item.attributes["machine-type"]
+            };
+        });
+    } catch (error) {
+        console.error('Erro ao buscar dados da API externa:', error);
+        showAlert(`Erro ao buscar dados de disponibilidade: ${error.message}`, 'Erro', 'error', true);
+        return null;
+    }
+}
+
+// Função para atualizar os dados das máquinas com as informações da API
+function atualizarDadosComApi(machinesData, apiData) {
+    if (!apiData || !Array.isArray(apiData) || apiData.length === 0) {
+        console.warn('Dados da API inválidos ou vazios');
+        return machinesData;
+    }
+    
+    console.log('Atualizando dados das máquinas com informações da API');
+    
+    // Mapear os nomes das máquinas para os status da API
+    const apiStatusMap = {};
+    apiData.forEach(item => {
+        apiStatusMap[item.name] = item.status;
+    });
+    
+    // Atualizar os dados das máquinas com os status da API
+    return machinesData.map(machine => {
+        // Apenas atualizar lavadoras e secadoras
+        if ((machine.tipo === 'Lavadora' || machine.tipo === 'Secadora') && apiStatusMap[machine.id]) {
+            // Verificar se o status mudou
+            if (machine.availability !== apiStatusMap[machine.id]) {
+                // Registrar no histórico a mudança de disponibilidade
+                if (!machine.historico) {
+                    machine.historico = [];
+                }
+                
+                machine.historico.unshift({
+                    timestamp: Date.now(),
+                    status: machine.status, // Status de conexão permanece o mesmo
+                    availability: apiStatusMap[machine.id],
+                    evento: `Alteração de disponibilidade via API: ${machine.availability} → ${apiStatusMap[machine.id]}`
+                });
+                
+                // Limitar histórico a 10 entradas
+                if (machine.historico.length > 10) {
+                    machine.historico = machine.historico.slice(0, 10);
+                }
+                
+                // Atualizar o timestamp de disponibilidade
+                machine.availabilityTimestamp = Date.now();
+            }
+            
+            // Atualizar a disponibilidade com o status da API
+            machine.availability = apiStatusMap[machine.id];
+        }
+        
+        return machine;
+    });
+}
+
+// Função para carregar o histórico do Firebase
+function carregarHistoricoStatus() {
+    console.log("Carregando histórico do Firebase...");
+    statusHistoryRef.orderByChild('timestamp').limitToLast(50).once('value')
+        .then(snapshot => {
+            const historicoData = snapshot.val();
+            if (historicoData) {
+                // Converter objeto em array
+                const historico = Object.values(historicoData);
+                
+                // Ordenar por timestamp (mais recentes primeiro)
+                historico.sort((a, b) => b.timestamp - a.timestamp);
+                
+                // Atualizar a lista na memória
+                statusHistory = historico;
+                
+                // Renderizar o histórico na tabela
+                renderizarHistoricoStatus();
+                
+                console.log(`Carregados ${historico.length} registros de histórico`);
+            } else {
+                console.log("Nenhum histórico encontrado no banco de dados");
+            }
+        })
+        .catch(error => {
+            console.error("Erro ao carregar histórico:", error);
+            showAlert("Erro ao carregar histórico de status", "Erro", "error", true);
+        });
+}
+
+// ... existing code ...
+
+// Elementos adicionais para a visualização de dados brutos
+const jsonViewer = document.getElementById('json-viewer');
+const refreshRawStatusBtn = document.getElementById('refresh-raw-status');
+const btnExpandAll = document.getElementById('btn-expand-all');
+const btnCollapseAll = document.getElementById('btn-collapse-all');
+const btnCopyJson = document.getElementById('btn-copy-json');
+
+// Dados brutos do status_machine
+let rawStatusData = null;
+
+// ... existing code ...
+
+// Função para mostrar detalhes de uma máquina
+function mostrarDetalhesMachine(tipo, id) {
+    // Encontrar a máquina
+    const machine = machinesStatusData.find(m => m.tipo === tipo && m.id === id);
+    
+    if (!machine) {
+        Swal.fire({
+            title: 'Erro',
+            text: `Máquina ${tipo} ${id} não encontrada`,
+            icon: 'error',
+            confirmButtonText: 'OK'
+        });
+        return;
+    }
+    
+    const statusClass = machine.status === 'online' ? 'text-success' : 
+                       machine.status === 'offline' ? 'text-danger' : 'text-secondary';
+    
+    // Formatação da disponibilidade
+    let availabilityText = '';
+    let availabilityClass = '';
+    let availabilitySection = '';
+    
+    // Apenas mostrar disponibilidade para lavadoras e secadoras
+    if (machine.tipo === 'Lavadora' || machine.tipo === 'Secadora') {
+        switch (machine.availability) {
+            case 'available':
+                availabilityText = 'Disponível';
+                availabilityClass = 'text-success';
+                break;
+            case 'busy':
+                availabilityText = 'Ocupada';
+                availabilityClass = 'text-warning';
+                break;
+            case 'suspended':
+                availabilityText = 'Suspensa';
+                availabilityClass = 'text-secondary';
+                break;
+            case 'unknown':
+            default:
+                availabilityText = 'Indeterminado';
+                availabilityClass = 'text-muted';
+                break;
+        }
+        
+        availabilitySection = `
+            <p><strong>Disponibilidade:</strong> <span class="${availabilityClass}">${availabilityText}</span></p>
+        `;
+    }
+    
+    Swal.fire({
+        title: `${tipo} ${id}`,
+        html: `
+            <div class="text-start">
+                <p><strong>Status atual:</strong> <span class="${statusClass}">${machine.status}</span></p>
+                ${availabilitySection}
+                <p><strong>Última atualização:</strong> ${formatarDataHora(machine.lastUpdate)}</p>
+            </div>
+        `,
+        icon: 'info',
+        confirmButtonText: 'Fechar'
+    });
+}
+
+// Função para formatar timestamp para data/hora legível
+function formatarDataHora(timestamp) {
+    const date = new Date(timestamp);
+    return `${date.toLocaleDateString('pt-BR')} ${date.toLocaleTimeString('pt-BR')}`;
+}
+
+// Função para formatar tempo relativo (quanto tempo atrás)
+function formatarTempoRelativo(diffMs) {
+    // Converter para segundos
+    const diffSec = Math.floor(diffMs / 1000);
+    
+    // Menos de 1 minuto
+    if (diffSec < 60) {
+        return 'Agora mesmo';
+    }
+    
+    // Menos de 1 hora
+    if (diffSec < 3600) {
+        const mins = Math.floor(diffSec / 60);
+        return `${mins} ${mins === 1 ? 'minuto' : 'minutos'} atrás`;
+    }
+    
+    // Menos de 1 dia
+    if (diffSec < 86400) {
+        const hours = Math.floor(diffSec / 3600);
+        return `${hours} ${hours === 1 ? 'hora' : 'horas'} atrás`;
+    }
+    
+    // Mais de 1 dia
+    const days = Math.floor(diffSec / 86400);
+    return `${days} ${days === 1 ? 'dia' : 'dias'} atrás`;
+}
+
+// ... existing code ...
+
+// Função para carregar dados brutos do nó status_machine
+function carregarRawStatus() {
+    console.log('Carregando dados brutos do nó status_machine...');
+    
+    // Identificar o elemento JSON viewer
+    const jsonViewer = document.getElementById('json-viewer');
+    
+    // Mostrar spinner
+    if (jsonViewer) {
+        jsonViewer.innerHTML = `
+            <div class="text-center py-4">
+                <div class="spinner-border text-primary" role="status">
+                    <span class="visually-hidden">Carregando...</span>
+                </div>
+                <p class="mt-2">Carregando dados brutos...</p>
+            </div>
+        `;
+    }
+    
+    // Buscar dados no Firebase - usando o nó status_machine em vez de status
+    const statusMachineRef = firebase.database().ref(`status_machine/${lojaId}`);
+    
+    statusMachineRef.once('value')
+        .then(snapshot => {
+            const data = snapshot.val() || {};
+            
+            // Renderiza JSON com formatação bonita
+            if (jsonViewer) {
+                try {
+                    // Formatação do JSON com indentação
+                    const formattedJson = JSON.stringify(data, null, 2);
+                    
+                    // Adicionar syntax highlighting
+                    jsonViewer.innerHTML = `<pre class="json-pre"><code class="language-json">${formattedJson}</code></pre>`;
+                    
+                    // Se tiver a biblioteca Prism.js carregada, aplicar o highlighting
+                    if (typeof Prism !== 'undefined') {
+                        Prism.highlightElement(jsonViewer.querySelector('code'));
+                    }
+                } catch (error) {
+                    jsonViewer.innerHTML = `<div class="alert alert-danger">Erro ao formatar JSON: ${error.message}</div>`;
+                    console.error('Erro ao formatar JSON:', error);
+                }
+            }
+            
+            console.log('Dados brutos carregados com sucesso');
+        })
+        .catch(error => {
+            console.error('Erro ao carregar dados brutos:', error);
+            
+            if (jsonViewer) {
+                jsonViewer.innerHTML = `
+                    <div class="alert alert-danger">
+                        <i class="fas fa-exclamation-triangle me-2"></i>
+                        Erro ao carregar dados brutos: ${error.message}
+                    </div>
+                `;
+            }
+        });
+}
+
+// ... existing code ...
+
+
+
+
+
