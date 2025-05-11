@@ -1,0 +1,301 @@
+/* Estilos gerais */
+body {
+    background-color: var(--background-color);
+    font-family: var(--font-family);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+/* Estilos para as abas */
+.nav-tabs {
+    border-bottom: 1px solid #dee2e6;
+}
+
+.nav-tabs .nav-link {
+    margin-bottom: -1px;
+    border: 1px solid transparent;
+    border-top-left-radius: var(--border-radius);
+    border-top-right-radius: var(--border-radius);
+    color: var(--secondary-color);
+    font-weight: 500;
+    padding: 0.75rem 1.25rem;
+    transition: all var(--transition-speed);
+    letter-spacing: 0.2px;
+}
+
+.nav-tabs .nav-link:hover {
+    border-color: #e9ecef #e9ecef #dee2e6;
+    color: var(--primary-color);
+}
+
+.nav-tabs .nav-link.active {
+    color: var(--primary-color);
+    background-color: #fff;
+    border-color: #dee2e6 #dee2e6 #fff;
+    font-weight: 600;
+}
+
+/* Estilos para tabela */
+.table {
+    margin-bottom: 0;
+}
+
+.table th {
+    font-weight: 600;
+    font-size: 0.85rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--secondary-color);
+    border-top: none;
+    padding: 1rem;
+}
+
+.table td {
+    vertical-align: middle;
+    padding: 0.85rem 1rem;
+    font-weight: 400;
+}
+
+.table-hover tbody tr:hover {
+    background-color: rgba(37, 99, 235, 0.05);
+}
+
+.totem-offline-row {
+    border-left: 4px solid var(--danger-color);
+}
+
+/* Estilos para o resumo estatístico */
+.progress {
+    height: 8px;
+    border-radius: var(--border-radius);
+    background-color: #e9ecef;
+    overflow: hidden;
+}
+
+.progress-bar {
+    transition: width 0.5s ease;
+}
+
+/* Cores para status crítico nas barras de progresso */
+.progress-bar-danger {
+    background-color: var(--danger-color);
+}
+
+/* Estilos para os cards de estatísticas */
+.card {
+    border: none;
+    border-radius: var(--border-radius);
+    transition: box-shadow var(--transition-speed), transform var(--transition-speed);
+}
+
+.card:hover {
+    box-shadow: 0 5px 15px rgba(0,0,0,0.08);
+    transform: translateY(-2px);
+}
+
+.card-title {
+    font-size: 0.95rem;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    color: var(--text-color);
+    font-weight: 600;
+}
+
+/* Estilos para os cards de lojas */
+.hover-card {
+    transition: transform var(--transition-speed), box-shadow var(--transition-speed);
+    border-radius: var(--border-radius);
+    overflow: hidden;
+}
+
+.hover-card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 10px 20px rgba(0, 0, 0, 0.1);
+}
+
+.card-body {
+    padding: 1.5rem;
+}
+
+.card-footer {
+    padding: 1rem 1.5rem 1.5rem;
+}
+
+/* Destacar cards com status offline */
+.card-offline {
+    border: 2px solid var(--danger-color) !important;
+    background-color: rgba(239, 68, 68, 0.05) !important;
+    box-shadow: 0 0 15px rgba(239, 68, 68, 0.3) !important;
+    animation: pulse-border 2s infinite !important;
+}
+
+@keyframes pulse-border {
+    0% {
+        box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7);
+    }
+    70% {
+        box-shadow: 0 0 0 10px rgba(239, 68, 68, 0);
+    }
+    100% {
+        box-shadow: 0 0 0 0 rgba(239, 68, 68, 0);
+    }
+}
+
+/* Destacar cards com totem offline */
+.totem-offline {
+    border-left: 4px solid var(--danger-color) !important;
+}
+
+/* Estilos para os filtros */
+.form-select {
+    border-radius: var(--border-radius);
+    border: 1px solid #ced4da;
+    padding: 0.5rem 1rem;
+    font-size: 0.9rem;
+    transition: all var(--transition-speed);
+    background-position: right 1rem center;
+}
+
+.form-select:focus {
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 0.25rem rgba(37, 99, 235, 0.25);
+}
+
+/* Estilo para o botão de limpar filtros */
+#clear-filters {
+    font-size: 0.85rem;
+    padding: 0.25rem 0.75rem;
+    transition: all var(--transition-speed);
+}
+
+#clear-filters:hover {
+    background-color: var(--danger-color);
+    border-color: var(--danger-color);
+    color: white;
+}
+
+/* Estilos para os badges de status */
+.badge {
+    padding: 0.5em 0.8em;
+    border-radius: 30px;
+    font-weight: 500;
+}
+
+.badge.bg-success {
+    background-color: var(--success-color) !important;
+}
+
+.badge.bg-warning {
+    background-color: var(--warning-color) !important;
+    color: white;
+}
+
+.badge.bg-danger {
+    background-color: var(--danger-color) !important;
+}
+
+/* Estilos para os ícones */
+.card-text i {
+    width: 20px;
+    text-align: center;
+    color: var(--secondary-color);
+}
+
+/* Navbar */
+.navbar {
+    background-color: white;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+}
+
+.navbar-brand {
+    font-weight: 600;
+    color: var(--text-color);
+    letter-spacing: 0.3px;
+}
+
+/* Botões */
+.btn {
+    font-weight: 500;
+    letter-spacing: 0.3px;
+}
+
+.btn-primary {
+    background-color: var(--primary-color);
+    border-color: var(--primary-color);
+    transition: all var(--transition-speed);
+}
+
+.btn-primary:hover {
+    background-color: #1d4ed8;
+    border-color: #1d4ed8;
+    transform: translateY(-1px);
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+/* Loading */
+#loading {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(255, 255, 255, 0.9);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 9999;
+}
+
+/* Responsividade */
+@media (max-width: 768px) {
+    .container {
+        padding: 1rem;
+    }
+}
+
+/* Ícones personalizados */
+.fa-washing-machine:before {
+    content: "\f2fd";
+}
+
+.fa-dryer:before {
+    content: "\f2fd";
+}
+
+/* Indicadores de status */
+.status-indicator,
+.totem-indicator {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    display: inline-block;
+    margin-right: 5px;
+}
+
+.status-online {
+    background-color: var(--success-color);
+    box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.2);
+}
+
+.status-offline {
+    background-color: var(--danger-color);
+    animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+    0% {
+        box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7);
+    }
+    70% {
+        box-shadow: 0 0 0 6px rgba(239, 68, 68, 0);
+    }
+    100% {
+        box-shadow: 0 0 0 0 rgba(239, 68, 68, 0);
+    }
+}
+
+.totem-indicator {
+    width: 8px;
+    height: 8px;
+    margin-left: 5px;
+}

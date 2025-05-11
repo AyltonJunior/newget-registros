@@ -1,0 +1,255 @@
+/* Import Google Fonts */
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap');
+
+/* Estilos comuns para o sistema */
+:root {
+    --primary-color: #2563eb;
+    --secondary-color: #64748b;
+    --success-color: #22c55e;
+    --danger-color: #ef4444;
+    --warning-color: #f59e0b;
+    --info-color: #3b82f6;
+    --background-color: #f8fafc;
+    --text-color: #1e293b;
+    --border-radius: 8px;
+    --transition-speed: 0.2s;
+    --font-family: 'Poppins', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+/* Aplicar fonte em todos os elementos, exceto ícones Font Awesome e SVG */
+*:not(i):not(svg):not([class^="fa"]):not([class*=" fa-"]), *:not(i):not(svg):not([class^="fa"]):not([class*=" fa-"])::before, *:not(i):not(svg):not([class^="fa"]):not([class*=" fa-"])::after {
+    font-family: var(--font-family);
+}
+
+i[class^="fa"], i[class*=" fa-"], svg[class^="fa"], svg[class*=" fa-"] {
+    font-family: 'Font Awesome 6 Free' !important;
+    font-style: normal;
+    font-weight: 900 !important;
+}
+
+body {
+    font-family: var(--font-family);
+    background-color: var(--background-color);
+    color: var(--text-color);
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+/* Aplicar fonte em elementos específicos */
+h1, h2, h3, h4, h5, h6, p, span, a, button, input, select, textarea, label, th, td {
+    font-family: var(--font-family);
+}
+
+/* Ajustes de fonte para elementos específicos */
+h1, h2, h3, h4, h5, h6 {
+    font-weight: 600;
+    letter-spacing: -0.02em;
+}
+
+p, span, a, label {
+    font-weight: 400;
+}
+
+button, .btn {
+    font-weight: 500;
+    letter-spacing: 0.01em;
+}
+
+input, select, textarea {
+    font-weight: 400;
+    letter-spacing: 0.01em;
+}
+
+th {
+    font-weight: 600;
+    letter-spacing: 0.02em;
+}
+
+td {
+    font-weight: 400;
+    letter-spacing: 0.01em;
+}
+
+/* Estilo para os badges */
+.badge {
+    display: inline-block;
+    padding: 6px 12px;
+    border-radius: 20px;
+    font-size: 0.85em;
+    font-weight: 500;
+    text-align: center;
+    transition: transform var(--transition-speed), box-shadow var(--transition-speed);
+    letter-spacing: 0.3px;
+}
+
+.badge:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.badge-lavadora {
+    background-color: var(--info-color);
+    color: white;
+}
+
+.badge-secadora {
+    background-color: var(--warning-color);
+    color: white;
+}
+
+.badge-dosadora {
+    background-color: var(--success-color);
+    color: white;
+}
+
+.badge-reset {
+    background-color: var(--danger-color);
+    color: white;
+}
+
+.badge-primary {
+    background-color: var(--primary-color);
+    color: white;
+}
+
+.badge-secondary {
+    background-color: var(--secondary-color);
+    color: white;
+}
+
+.badge-success {
+    background-color: var(--success-color);
+    color: white;
+}
+
+.badge-danger {
+    background-color: var(--danger-color);
+    color: white;
+}
+
+.badge-warning {
+    background-color: var(--warning-color);
+    color: white;
+}
+
+.badge-info {
+    background-color: var(--info-color);
+    color: white;
+}
+
+/* Estilo para campos da modal de detalhes */
+.field-name {
+    font-weight: 600;
+    color: var(--secondary-color);
+    margin-bottom: 4px;
+}
+
+.field-value {
+    color: var(--text-color);
+    font-weight: 500;
+}
+
+.code-block {
+    background-color: #f1f5f9;
+    border: 1px solid #e2e8f0;
+    border-radius: var(--border-radius);
+    padding: 16px;
+    max-height: 300px;
+    overflow-y: auto;
+    font-family: 'JetBrains Mono', monospace;
+    white-space: pre-wrap;
+    font-size: 0.9em;
+    line-height: 1.5;
+}
+
+/* Ajustes de layout */
+.container {
+    padding: 24px;
+    max-width: 1200px;
+    margin: 0 auto;
+}
+
+/* DataTables personalizações */
+.dataTables_wrapper .dataTables_paginate .paginate_button.current {
+    background: var(--primary-color) !important;
+    color: white !important;
+    border-color: var(--primary-color) !important;
+    border-radius: var(--border-radius);
+}
+
+.dataTables_wrapper .dataTables_paginate .paginate_button:hover {
+    background: var(--primary-color) !important;
+    color: white !important;
+    border-color: var(--primary-color) !important;
+    opacity: 0.9;
+}
+
+/* Estado vazio */
+.empty-state {
+    padding: 40px;
+    text-align: center;
+    color: var(--secondary-color);
+    background: white;
+    border-radius: var(--border-radius);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+/* Botões modernos */
+.btn {
+    padding: 8px 16px;
+    border-radius: var(--border-radius);
+    transition: all var(--transition-speed);
+    border: none;
+    cursor: pointer;
+}
+
+.btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+/* Cards modernos */
+.card {
+    background: white;
+    border-radius: var(--border-radius);
+    padding: 20px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    transition: transform var(--transition-speed), box-shadow var(--transition-speed);
+}
+
+.card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+/* Inputs modernos */
+input, select, textarea {
+    padding: 8px 12px;
+    border: 1px solid #e2e8f0;
+    border-radius: var(--border-radius);
+    transition: border-color var(--transition-speed), box-shadow var(--transition-speed);
+}
+
+input:focus, select:focus, textarea:focus {
+    outline: none;
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+}
+
+/* Garante que os ícones Font Awesome usem a fonte correta */
+.fa, .fas, .far, .fal, .fab, .fa-solid, .fa-regular, .fa-light, .fa-brands {
+  font-family: 'Font Awesome 6 Free' !important;
+  font-style: normal;
+  font-weight: 900 !important;
+}
+.fa-regular, .far {
+  font-weight: 400 !important;
+}
+.fa-light {
+  font-weight: 300 !important;
+}
+.fa-brands {
+  font-family: 'Font Awesome 6 Brands' !important;
+  font-weight: 400 !important;
+} 
